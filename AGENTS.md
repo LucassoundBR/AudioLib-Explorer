@@ -91,9 +91,24 @@ Reuse passing results while the relevant application/test source, features, tool
 
 ## Mandatory local application delivery and release installation
 
+### Development checkpoints and fast preview
+
+The user authorizes validated development checkpoints without rebuilding,
+packaging or installing the desktop at every checkpoint. A checkpoint records
+its exact scope and pending integration checks; it is not a completed application
+delivery. Use the opt-in `preview` Cargo profile for iteration and
+`tools/check-fast.ps1` for isolated REAPER protocol/native pure tests. These tests
+compile the real source without Slint; Controller/UI and native host acceptance
+remain separate. See `doc/Fast_Development.md`.
+
+Perform the full delivery sequence below when closing an application delivery,
+before updating the daily installation or publishing artifacts. Preview binaries
+must never replace accepted `local_release/`. Reuse still-valid checks, keep
+cache budget maintenance, and do not launch preview GUI without an agreed window.
+
 `local_release/` is the persistent local installation used for manual acceptance and everyday use. Reuse this exact directory; do not create versioned or timestamped local installation directories. `dist/latest/` remains the packaging output, and `target/` remains the build output. Neither replaces the required local installation step.
 
-For every completed change affecting the application, follow this sequence:
+For every completed application delivery, follow this sequence:
 
 1. Complete the checks selected by change scope above, plus the applicable data-safety regressions. Do not add unrelated workspace/ASIO suites. Keep test databases in isolated temporary directories.
 2. Build the latest source with `tools/build-release.ps1`, then package with `tools/package-portable.ps1 -SkipBuild`; for a tagged package, `tools/ci-release.ps1 -Tag <tag>` replaces those two commands. Use the same ASIO selection for build and packaging; the default includes the verified ASIO SDK. Build/package each payload once. Never install stale binaries from an earlier build.

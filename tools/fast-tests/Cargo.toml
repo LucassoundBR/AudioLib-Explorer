@@ -1,0 +1,18 @@
+[package]
+name = "audiolib-fast-tests"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.97"
+license = "GPL-3.0-only"
+publish = false
+autobins = false
+
+# Intentionally independent: no desktop/Slint dependency resolution.
+[workspace]
+
+[[test]]
+name = "reaper-contracts"
+path = "reaper_contracts.rs"
+
+[dev-dependencies]
+tempfile = "3"
