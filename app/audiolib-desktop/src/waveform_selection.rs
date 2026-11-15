@@ -304,7 +304,11 @@ impl Controller {
             let root = c.config.lock().unwrap().data_root();
             let c = c.clone();
             std::thread::spawn(move || {
-                let result = crate::reaper_bridge::Bridge::new(&root).install();
+                let result = crate::reaper_bridge::Bridge::new(&root)
+                    .install()
+                    .and_then(|_| {
+                        audiolib_windows::export_reaper_extension(&root.join("reaper-bridge"))
+                    });
                 post(c.ui.clone(), move |ui| match result {
                     Ok(path) => {
                         ui.set_reaper_script_path(path.display().to_string().into());
@@ -321,7 +325,7 @@ impl Controller {
                 .lock()
                 .unwrap()
                 .data_root()
-                .join("reaper-bridge/AudioLib_Explorer_Bridge.lua");
+                .join("reaper-bridge/reaper_audiolib_bridge.dll");
             if let Err(error) = audiolib_windows::reveal_path(&path) {
                 c.status(error.to_string());
             }

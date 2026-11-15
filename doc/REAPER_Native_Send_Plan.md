@@ -256,3 +256,54 @@ Reproduce compilation in the configured project toolchain:
 rustfmt --edition 2024 --check tools/reaper-undo-extension.rs
 clippy-driver --edition 2024 --crate-type cdylib -D warnings tools/reaper-undo-extension.rs -o .rust-validation/reaper-native-probe/reaper_audiolib_undo_proof.dll
 ```
+
+## Milestone 6: approved extension integration checkpoint
+
+The user selected native DLL integration, including its one-time host setup.
+Production source is now `crates/audiolib-windows/src/reaper_extension_host.rs`;
+the standalone tool imports that actual source. A shared protocol module is used
+by the receiver and desktop adapter. The Windows build compiles a small native
+DLL into OUT_DIR and embeds it in AudioLib. Connect REAPER exports it atomically
+and shows copy-to-UserPlugins/restart instructions in the existing setup dialog.
+The waveform, controls, Send button, S shortcut and focus option retain their
+layout. The existing Lua companion remains an explicitly running compatibility
+alternative, not a requirement for the new setup.
+
+Native discovery now requires the versioned endpoint in the verified REAPER PID.
+It refuses absent/incompatible extensions and requires exactly one selected
+track before durable region publication, with readiness rechecked at dispatch.
+The packet is a bounded literal UTF-8 path, with no stock `0x100` fallback.
+One synchronous host transaction inserts, restores the cursor and records Undo;
+acknowledgement requires the expected one-item increase. Failure/timeout is never
+automatically retried. Missing DLL setup cannot silently use the defective old
+transport. The main REAPER HWND remains the optional foreground target.
+
+Checkpoint validation passed on Windows x64/Rust 1.97.1:
+
+- Actual-source fast target: strict Clippy and 11 tests, including balanced Undo
+  sequencing, cursor restoration, invalid track selection and failed insertion
+  without retry. The first run found test-module ordering/duplicate-import lint
+  issues; those were corrected. Its deliberate import of one wire source into
+  independently compiled endpoints is allowed only in the test harness.
+- Root formatting, standalone extension strict Clippy/rustfmt, desktop/Windows
+  strict all-target Clippy with ASIO: pass (Clippy 6m14s).
+- Six Windows tests: pass, including atomic export preserving unrelated files
+  and retaining a locked previous DLL on failure. Six desktop REAPER tests:
+  pass; two explicit helpers remain ignored, with the child test run by its
+  parent. The desktop binary retains search/edit/modal/busy guards and existing
+  Controller export/close coverage.
+
+The first SDK preparation attempt used the default LLVM path and failed before
+checks; the configured verified project libclang path resolved it. Unfiltered
+offline metadata inspection encountered an uncached nonselected dependency;
+actual Windows checks ran offline successfully. The only dependency change is
+an edge to already locked tempfile 3 for atomic DLL export, not a version update.
+No schema, database, server or device-backend behavior changed. Their recorded
+baselines remain applicable; unrelated regressions/hardware tests were excluded.
+
+Evidence: `check-dll-integration.log` and fast-check run
+`45b0fb6cae024a0588c233356bc96ee0`. This is a validated source checkpoint, not an
+application delivery. A new release build/package, full portable acceptance,
+real button/S/Undo/Redo/focus acceptance with the production DLL, fixed local
+installation and final cache maintenance remain pending. The old package must
+not replace the daily installation. No release/tag/merge is requested.

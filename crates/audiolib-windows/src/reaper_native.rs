@@ -2,6 +2,9 @@
 //! Native REAPER import. No process launch, UI input, polling or automatic retry.
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
+#[path = "reaper_protocol.rs"]
+#[cfg_attr(not(windows), allow(dead_code))]
+mod protocol;
 
 /// Identity of one unambiguous running REAPER main window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19,6 +22,8 @@ impl NativeReaper {
         if !window_ready(target.window) {
             return Err("Finish REAPER startup and close its dialogs before sending".into());
         }
+        #[cfg(windows)]
+        extension_receiver(target.pid)?;
         Ok(target)
     }
 
@@ -208,7 +213,7 @@ fn payload(path: &str) -> Result<Vec<u8>, String> {
     {
         return Err("Expected an absolute filesystem path without control characters".into());
     }
-    let mut bytes = format!("#NOTAB#{path}").into_bytes();
+    let mut bytes = path.into_bytes();
     bytes.push(0);
     if bytes.len() > 32 * 1024 {
         return Err("The audio path is too long for native REAPER import".into());
@@ -222,14 +227,119 @@ fn outcome(transport: bool, receiver: usize, error: u32) -> Result<&'static str,
         Err(format!(
             "Delivery unconfirmed (Win32 {error}); inspect REAPER before any manual retry"
         ))
-    } else if receiver == 0 {
-        Err(
-            "Receiver returned zero; insertion not confirmed. Inspect REAPER; do not auto-retry"
-                .into(),
-        )
     } else {
-        Ok("Receiver returned nonzero; inspect the project to verify actual insertion")
+        match receiver {
+            protocol::ACCEPTED => {
+                Ok("REAPER extension accepted insertion; verify actual insertion")
+            }
+            protocol::NO_TRACK => Err("Select exactly one destination track in REAPER".into()),
+            protocol::BUSY => {
+                Err("REAPER extension is busy; inspect REAPER before retrying".into())
+            }
+            protocol::REJECTED => {
+                Err("REAPER extension rejected the request before insertion".into())
+            }
+            protocol::UNCONFIRMED => {
+                Err("Insertion unconfirmed; inspect REAPER before any manual retry".into())
+            }
+            _ => Err("Insertion unconfirmed; inspect REAPER before any manual retry".into()),
+        }
     }
+}
+
+#[cfg(windows)]
+fn extension_receiver(pid: u32) -> Result<usize, String> {
+    use std::ffi::c_void;
+    type Hwnd = *mut c_void;
+    struct Search {
+        pid: u32,
+        windows: Vec<usize>,
+    }
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn EnumWindows(callback: unsafe extern "system" fn(Hwnd, isize) -> i32, data: isize)
+        -> i32;
+        fn GetWindowThreadProcessId(window: Hwnd, pid: *mut u32) -> u32;
+        fn GetClassNameW(window: Hwnd, class: *mut u16, size: i32) -> i32;
+        fn SendMessageTimeoutW(
+            window: Hwnd,
+            msg: u32,
+            w: usize,
+            l: isize,
+            flags: u32,
+            timeout: u32,
+            result: *mut usize,
+        ) -> isize;
+    }
+    unsafe extern "system" fn visit(window: Hwnd, data: isize) -> i32 {
+        // SAFETY: Synchronous enumeration borrows Search; query-only HWND calls.
+        let search = unsafe { &mut *(data as *mut Search) };
+        let mut owner = 0;
+        let mut class = [0u16; 128];
+        // SAFETY: Scalar output and bounded writable class-name buffer.
+        let length = unsafe {
+            GetWindowThreadProcessId(window, &mut owner);
+            GetClassNameW(window, class.as_mut_ptr(), 128)
+        };
+        if owner == search.pid
+            && length > 0
+            && class[..length as usize] == protocol::CLASS_NAME.encode_utf16().collect::<Vec<_>>()
+        {
+            search.windows.push(window as usize);
+        }
+        1
+    }
+    let mut search = Search {
+        pid,
+        windows: Vec::new(),
+    };
+    // SAFETY: Search remains alive for this synchronous enumeration only.
+    if unsafe { EnumWindows(visit, &mut search as *mut Search as isize) } == 0
+        || search.windows.len() != 1
+    {
+        return Err(
+            "Install the AudioLib native DLL via Connect REAPER, then restart REAPER".into(),
+        );
+    }
+    let receiver = search.windows[0];
+    let mut version = 0;
+    // SAFETY: Bounded scalar handshake to the extension in the verified host PID.
+    if unsafe {
+        SendMessageTimeoutW(
+            receiver as Hwnd,
+            protocol::HELLO,
+            0,
+            0,
+            0x23,
+            1000,
+            &mut version,
+        )
+    } == 0
+        || version != protocol::VERSION
+    {
+        return Err(
+            "REAPER extension is unavailable or incompatible; update the DLL and restart REAPER"
+                .into(),
+        );
+    }
+    let mut ready = 0;
+    // SAFETY: Readiness is query-only, with the same bounded scalar transport.
+    if unsafe {
+        SendMessageTimeoutW(
+            receiver as Hwnd,
+            protocol::READY,
+            0,
+            0,
+            0x23,
+            1000,
+            &mut ready,
+        )
+    } == 0
+    {
+        return Err("REAPER extension did not respond; no audio was sent".into());
+    }
+    outcome(true, ready, 0)?;
+    Ok(receiver)
 }
 
 #[cfg(not(windows))]
@@ -391,8 +501,9 @@ fn native_send(
                 .into(),
         );
     }
+    let receiver_window = extension_receiver(pid)?;
     let packet = CopyData {
-        kind: 0x100,
+        kind: protocol::PACKET,
         length: bytes.len() as u32,
         data: bytes.as_ptr(),
     };
@@ -403,7 +514,7 @@ fn native_send(
     let sent = unsafe {
         SetLastError(0);
         SendMessageTimeoutW(
-            window,
+            receiver_window as Handle,
             0x4a,
             0,
             ptr::from_ref(&packet) as isize,
@@ -424,10 +535,7 @@ mod tests {
     #[test]
     fn native_payload_preserves_literal_unicode_and_normalizes_prefixes() {
         let path = r"C:\seleção '音效' #1.wav";
-        assert_eq!(
-            payload(path).unwrap(),
-            format!("#NOTAB#{path}\0").into_bytes()
-        );
+        assert_eq!(payload(path).unwrap(), format!("{path}\0").into_bytes());
         assert_eq!(
             payload(r"\\?\C:\test.wav").unwrap(),
             payload(r"C:\test.wav").unwrap()
@@ -463,6 +571,13 @@ mod tests {
     fn native_outcome_and_close_intent_do_not_claim_insertion() {
         assert!(outcome(false, 1, 1460).unwrap_err().contains("unconfirmed"));
         assert!(outcome(true, 0, 0).is_err());
+        assert!(outcome(true, protocol::REJECTED, 0).is_err());
+        assert!(
+            outcome(true, protocol::NO_TRACK, 0)
+                .unwrap_err()
+                .contains("exactly one")
+        );
+        assert!(outcome(true, protocol::UNCONFIRMED, 0).is_err());
         assert!(
             outcome(true, 1, 0)
                 .unwrap()

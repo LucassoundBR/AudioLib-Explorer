@@ -1,16 +1,19 @@
 # REAPER send integration
 
-AudioLib sends to an already-running REAPER session through native Windows import.
+AudioLib sends to an already-running REAPER session through its native Windows extension.
 It never launches REAPER, changes its audio driver or starts playback. Windows is
-the initial supported platform. No extension, web server or network port is needed.
+the initial supported platform. The host DLL is required; no Lua, web server or network port is needed.
 
 ## Setup and use
 
-1. Open one REAPER instance and finish startup. No script is required.
+1. Click **Connect REAPER…** to export the bundled native DLL. With REAPER closed,
+   copy it into **UserPlugins** in REAPER's resource folder, then restart REAPER
+   and finish startup. This is a one-time setup; replace the DLL with the host
+   closed when updating it. No script is required.
 2. Keep only the intended destination instance open. Native discovery rejects
    multiple or unverifiable REAPER windows instead of guessing. The app rechecks
    process creation time, executable and HWND immediately before native send.
-3. Select a destination track in REAPER and place the edit cursor.
+3. Select exactly one destination track in REAPER and place the edit cursor.
 4. Select a local file in AudioLib and click **Send to REAPER · S**, or press `S`
    outside text editors. An active waveform region sends that region instead;
    wait for its original-quality export to finish preparing first.
@@ -19,17 +22,19 @@ the initial supported platform. No extension, web server or network port is need
    current AudioLib session. Windows may deny activation; focus failure never
    triggers another import attempt.
 
-The active project and selected track when REAPER processes native import are
-the destination. Import follows REAPER preferences, including cursor advancement
-and behavior when no track is selected. A completed native message does not
-provide project/cursor/item-count telemetry; the status reports acceptance of
-the request without inventing an insertion receipt. Unsaved projects are supported.
+The active project and selected track when REAPER processes the request are
+the destination. The extension groups insertion in an Undo transaction and
+restores the edit cursor. A successful acknowledgement requires a one-item count
+increase; it does not return project/position telemetry, so the status does not
+invent those details. Unsaved projects are supported. REAPER's media-copy
+preferences still control how imported files are retained.
 
 ### Optional companion alternative
 
-**Connect REAPER…** still displays the optional companion path. Load and run it
-through **Actions → Show action list → New action → Load ReaScript** if its
-explicit project/cursor acknowledgement and cursor preservation are preferred.
+**Connect REAPER…** also generates `AudioLib_Explorer_Bridge.lua` beside the DLL
+for compatibility. This is optional; native operation never loads it. Load and
+run it through **Actions → Show action list → New action → Load ReaScript** if
+the older explicit project/cursor acknowledgement workflow is desired.
 A fresh companion for the current AudioLib data directory is selected before
 submission; otherwise native discovery is used. No transport is tried after a
 failed or uncertain submission to the other. The companion requires a selected
@@ -52,8 +57,8 @@ track and restores the cursor. Keep one companion session per data directory.
 
 ## Delivery and failure handling
 
-Native import sends one bounded synchronous `WM_COPYDATA` request with `dwData`
-`0x100`, a NUL-terminated UTF-8 path and `#NOTAB#`, using a two-second Windows
+Native insertion sends one bounded synchronous `WM_COPYDATA` request to the
+version-checked extension endpoint, with a NUL-terminated UTF-8 path, using a two-second Windows
 timeout on a worker. No input, process launch, clipboard or broadcast is used.
 Timeout/zero receiver results are unconfirmed and never retried automatically.
 Finish startup and close active REAPER dialogs before sending. Native readiness
@@ -192,3 +197,33 @@ demonstrated independent insertion Undo/Redo using the public REAPER API without
 Lua. It is a test-only DLL proof, not the button/S implementation. Production
 integration is pending a decision on requiring a host extension installation;
 the accepted daily installation is unchanged.
+
+### Native extension integration (approved implementation)
+
+The user approved the native DLL approach after the independent Undo/Redo proof.
+The Windows build embeds `reaper_audiolib_bridge.dll` in AudioLib; no separate
+download or Lua execution is needed. Connect REAPER exports the DLL into the
+selected AudioLib data directory's `reaper-bridge` folder and shows its path.
+Copy it into **UserPlugins** in REAPER's resource folder (Options → Show REAPER
+resource path), with REAPER closed, then restart the host. This export does not
+silently change a REAPER profile. The generated legacy Lua companion remains an
+optional compatibility artifact; it is not required or loaded by native setup.
+
+The original button, S shortcut, region exporter and opt-in Auto-Focus remain in
+place. Without a freshly running opt-in Lua companion, the client now requires
+one verified REAPER process and its versioned native extension endpoint. It checks
+readiness, open dialogs and exactly one selected destination track before region
+publication, then rechecks at dispatch. Missing/incompatible extensions produce
+setup instructions; there is no fallback to the stock import that lacked an
+independent Undo point. Uncertain delivery is never retried automatically.
+
+The extension runs insertion on REAPER's UI thread, brackets it in a public Undo
+transaction, restores the edit cursor and acknowledges only a one-item count
+increase. Native status does not invent project/position telemetry. The extension
+does not register a network service or perform audio callbacks. The DLL source
+and desktop client share bounded local protocol definitions. The standalone fast
+target compiles both actual endpoints and checks Undo transaction sequencing,
+no-track refusal and balanced failure without Slint or a live host.
+
+This section describes the implementation; final package and button/S native
+acceptance results must be recorded separately before calling delivery complete.

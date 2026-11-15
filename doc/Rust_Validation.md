@@ -2059,3 +2059,17 @@ reported blocked: another managed build/test/release or cleanup held the lease.
 No cache was removed or process terminated. This run did not measure a new
 logical cache size or establish that the 40-GiB budget is currently met. Preserve
 diagnostics and retry maintenance after the unrelated lease is released.
+
+### Approved native extension integration checkpoint
+
+The user approved requiring the native DLL without Lua. See [milestone 6](REAPER_Native_Send_Plan.md#milestone-6-approved-extension-integration-checkpoint)
+for implementation and validation scope. Root formatting, standalone extension
+strict Clippy/rustfmt, Windows/desktop strict all-target Clippy with the shipped
+ASIO selection, 11 fast tests, six Windows tests and six desktop REAPER tests
+passed. Two desktop helpers remain ignored; the parent runs its isolated child.
+No native GUI acceptance of the integrated app or updated installation is claimed
+at this checkpoint. The prior stock transport package is stale for this source.
+Actual source and DLL protocol changed; their old acceptance cannot be reused.
+Database/server/audio backend behavior did not change and their relevant
+documented baselines remain applicable. Release build/package and independent
+native/installed acceptance are the next delivery steps.
