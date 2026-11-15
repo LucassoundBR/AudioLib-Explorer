@@ -54,10 +54,13 @@ timeout/ambiguous failure retain the exported WAV and never retry automatically.
 
 ## Current boundary
 
-The user requested no interface interaction on 2026-11-15. Milestone 1 can run
-without windows or audio. Native insertion, receiver encoding/result semantics,
-track/cursor behavior, speed and Auto-Focus remain unverified for this transport.
-Do not replace the already-validated companion path until milestone 2 passes.
+The first milestone ran without interface interaction. The user then authorized
+the native transport tests recorded below, followed by integration. After
+returning to the shared computer during the release build, the user requested
+CLI-only work again. Do not interact with windows or run GUI-starting CLI tests
+until another agreed interactive window. The native transport is verified for
+the recorded files/REAPER version; application button/S, Auto-Focus, full portable
+startup acceptance and installation remain pending.
 
 ## Milestone 1 evidence (2026-11-15)
 
@@ -118,3 +121,23 @@ last-active-popup check then refused a send with the same Preferences window
 open. This extra condition is applied before region publication and rechecked
 at dispatch in the production adapter. This is a recorded failed experiment,
 not a passing modal test for the earlier prototype revision.
+
+## Milestone 3: automated integration and candidate package
+
+Commit `35c393b` integrates native discovery/import into the existing button and
+S handler. Source layout is unchanged; setup help describes native use and the
+optional companion. Automated checks passed as recorded in Rust_Validation.md.
+
+The Windows x64 ASIO build passed in 28m16s. Packaging passed licenses, updater
+compatibility, publication/privacy boundary and ZIP-entry checks (906 files).
+Both packaged EXEs match build outputs and checksum sidecars; version-only
+execution returned 1.0.0/exit 0 without initializing runtime data or GUI.
+Archive SHA256: `12e52e266541447d85dca67a6132266bbdfa79d9cc38fd512850250bdb094ee9`.
+
+The candidate is not installed over `local_release/`. Next: in an authorized
+interactive window, run full `validate-portable.ps1`, then test the packaged app
+against the preserved tracked REAPER instance/project with no Lua loaded.
+Observe native button/S and focus off/on before raising windows; save/inspect
+the owned RPP/WAVs and verify Undo. Finish fixed installation and its startup
+identity checks only after acceptance. Preserve existing user sessions; recheck
+the tracked PID/start/profile/project before resuming, never blindly relaunch.

@@ -45,10 +45,13 @@ authorized session. Recheck the backend if that profile is replaced. Dummy
 Audio does not prove real-device latency/playback and does not
 remove the evaluation notice, update dialogs or plugin-licensing prompts.
 
-The production send bridge is a companion loaded in the user's already-running
-REAPER session. AudioLib sends local protocol messages; it never launches REAPER
-or changes its audio driver. This is separate from the synthetic native test
-harness and its dedicated profile.
+Production sends use native Windows import in an already-running REAPER, with
+the loaded companion retained as an optional alternative. AudioLib never launches
+REAPER or changes its audio driver. The older `test-reaper-send.ps1 -Run` exercises
+the companion proof, not the native import adapter. For native acceptance use
+the [native plan/probe](REAPER_Native_Send_Plan.md) and then the actual packaged
+button/S/focus workflow in the dedicated profile. A packet unit test or companion
+pass does not establish native application acceptance.
 
 After the user has agreed to interactive testing, run:
 

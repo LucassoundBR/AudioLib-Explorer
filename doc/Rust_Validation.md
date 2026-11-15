@@ -1947,5 +1947,28 @@ Automated candidate checks passed on Rust 1.97.1 MSVC:
 No audio backend, slice encoder, schema, database writes, server contract,
 dependency or packaging-script behavior changed. Their relevant recorded
 baselines remain applicable; unrelated device/data/performance suites were not
-rerun. Build, packaged startup, native button/S/Auto-Focus and fixed installation
-are pending for this candidate; no earlier application pass substitutes for them.
+rerun. No earlier companion application pass substitutes for native application
+acceptance of this candidate.
+
+The Windows x64 ASIO release build passed in 28m16s, using the verified SDK2.3.4.
+License preflight passed (480 packages / 837 notices). Packaging passed license
+materials, v0.7.8 updater compatibility (906 files), publication/privacy boundary
+and safe ZIP-entry checks. Both EXEs match release outputs and checksum sidecars;
+bounded `--version` execution passed with exit0/1.0.0 and no runtime directory
+creation. `main.rs` handles this flag before config/UI/backend initialization;
+version-only execution is not native startup acceptance.
+
+Candidate archive SHA256:
+`12e52e266541447d85dca67a6132266bbdfa79d9cc38fd512850250bdb094ee9`.
+Private receipts/logs are in `.rust-validation/reaper-native-probe/`.
+
+The user returned to the shared computer and requested no more interface
+interaction. Full portable GUI/startup, native app button/S/focus and fixed
+installation remain pending; `local_release/` retains the previous accepted
+build. The next native acceptance project was prepared with one selected track,
+zero items, cursor2.5 and no Lua launched, using the same dedicated profile.
+Final-module live discovery resolved its tracked identity; cancellation was
+verified before any source I/O/native message. No app-level insertion or focus
+pass is inferred. The host was preserved in the background, not terminated or
+relaunched. Cache pruning remains deferred to the delivery acceptance/install
+boundary; retained caches support the pending checks without another rebuild.
