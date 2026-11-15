@@ -86,4 +86,27 @@ chooses a PID itself. Its flag does not replace interactive authorization.
 
 The application and its dependencies were not changed; existing application
 validation remains applicable. This standalone experiment does not trigger an
-application rebuild/package/install. No native send or Auto-Focus was executed.
+application rebuild/package/install. At that milestone no native send or Auto-Focus was executed.
+
+## Milestone 2: native transport acceptance (2026-11-15)
+
+In the explicitly authorized interactive session, REAPER 7.85 ran the persistent
+owned profile with Dummy Audio (verified in its audio status). The normal enabled
+Still Evaluating control dismissed the evaluation notice. A new owned project
+and read-only media inspector were used; no send companion was loaded.
+
+The compiled native probe sent a synthetic 1-second 48 kHz/24-bit stereo WAV
+named with spaces, accents, Chinese, quotes and #. The receiver returned nonzero;
+independent project inspection established one item at the 2.5-second edit
+cursor and exact original file SHA256. Undo removed the item. A prepared
+250-ms WAV was then sent at the current 3.5-second cursor: one 48 kHz stereo
+item, 0.25-second duration, with SHA256 identical to the prepared 24-bit slice.
+Playback remained stopped and the normal REAPER preferences hash was unchanged.
+
+Native insertion follows REAPER import preferences: this profile advances the
+edit cursor to the inserted item's end, unlike the old companion's explicit
+cursor restoration. Application status must not fabricate cursor/project data
+that this transport does not return. Missing-track, multi-instance, modal and
+Auto-Focus cases require separate application acceptance; they are not inferred
+from the successful whole/region transport checks. Evidence is retained in the
+ignored run `f45b6201420b4851a75151d19f74304c`.
