@@ -100,7 +100,7 @@ does not count as acceptance of a new implementation. Follow
 [Shared desktop test workflow](Shared_Desktop_Testing.md); a hidden REAPER process
 does not guarantee that startup notices stay in the background.
 
-### Native acceptance procedure
+### Companion acceptance procedure
 
 In an agreed interactive window or a separate test session:
 
@@ -159,3 +159,30 @@ The reviewed native layout was existing `default-v2`: the Classic player has a
 full-width waveform with controls above it. The earlier Studio screenshot used
 the existing alternate player; this change does not move waveform/parameter
 controls between those layouts. User theme preferences were not overwritten.
+
+### Native transport application acceptance: 2026-11-15
+
+The packaged native candidate (`35c393b`, unchanged application source after
+development-tooling checkpoints) was tested without Lua or a companion, using
+the persistent Dummy Audio test profile and isolated synthetic library. Full
+portable startup acceptance passed. The existing button sent one whole WAV at
+the edit cursor; `S` sent an active Waveform region. Both retained PCM24/48 kHz/
+stereo and verified source bytes. Auto-Focus off left AudioLib foreground;
+Auto-Focus on restored minimized REAPER and brought it forward. An open
+Preferences dialog prevented publication, and absent REAPER was not launched.
+The existing layout was retained.
+
+**Delivery is withheld because independent Undo acceptance failed.** After the
+whole-file import, Ctrl+Z and toolbar Undo did not remove the item; Edit reported
+Can't undo. After the region import it again reported Can't undo, despite a
+prior manual deletion and an enabled 256-MB Undo budget. The mechanism is still
+under investigation. The earlier script-backed probe observation cannot
+establish standalone native Undo behavior. Do not advertise equivalent Undo
+semantics to the companion or overwrite the accepted `local_release/` yet.
+
+Both owned apps were closed normally; runtime data and installed binaries were
+preserved. See [native acceptance and next diagnostic](REAPER_Native_Send_Plan.md#milestone-4-application-acceptance-delivery-withheld-2026-11-15)
+for exact artifacts, checks and unverified cases. A production fix requires
+affected source checks, a revised release payload and independent native
+acceptance before installation; workflow-only changes do not require rebuilding
+the unchanged candidate.

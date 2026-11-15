@@ -101,7 +101,9 @@ and read-only media inspector were used; no send companion was loaded.
 The compiled native probe sent a synthetic 1-second 48 kHz/24-bit stereo WAV
 named with spaces, accents, Chinese, quotes and #. The receiver returned nonzero;
 independent project inspection established one item at the 2.5-second edit
-cursor and exact original file SHA256. Undo removed the item. A prepared
+cursor and exact original file SHA256. Undo removed the item in the inspector
+fixture, but the later independent application check below invalidates treating
+that result as native Undo acceptance. A prepared
 250-ms WAV was then sent at the current 3.5-second cursor: one 48 kHz stereo
 item, 0.25-second duration, with SHA256 identical to the prepared 24-bit slice.
 Playback remained stopped and the normal REAPER preferences hash was unchanged.
@@ -134,10 +136,61 @@ Both packaged EXEs match build outputs and checksum sidecars; version-only
 execution returned 1.0.0/exit 0 without initializing runtime data or GUI.
 Archive SHA256: `12e52e266541447d85dca67a6132266bbdfa79d9cc38fd512850250bdb094ee9`.
 
-The candidate is not installed over `local_release/`. Next: in an authorized
-interactive window, run full `validate-portable.ps1`, then test the packaged app
-against the preserved tracked REAPER instance/project with no Lua loaded.
-Observe native button/S and focus off/on before raising windows; save/inspect
-the owned RPP/WAVs and verify Undo. Finish fixed installation and its startup
-identity checks only after acceptance. Preserve existing user sessions; recheck
-the tracked PID/start/profile/project before resuming, never blindly relaunch.
+## Milestone 4: application acceptance, delivery withheld (2026-11-15)
+
+The authorized interactive session reused the persistent Dummy Audio profile
+and an owned project, with no Lua or companion loaded. The same candidate from
+`35c393b` was used; later development-tooling commits did not change shipped
+application source or the release profile. No rebuild was needed.
+
+Full portable acceptance passed once: EXE identity, isolated first startup and
+synthetic scan, CLI statistics, Chinese UI startup/exit, expected invalid-settings
+diagnostic, licenses and unchanged source. The candidate desktop SHA256 remains
+`f77d39f993774dd073be42b82bd3fc1ec82fbd9a7482728eade32beb56280bb6`.
+
+Application checks established:
+
+- Button, focus off: exactly one 1-second item at cursor 2.5 seconds; AudioLib
+  remained foreground. REAPER copied the media according to its preferences;
+  the imported file SHA256 matches the original 48 kHz/24-bit stereo source.
+- `S` with an active Waveform region: exactly one 12,015-frame/250.3125-ms item
+  at the then-current cursor of 3 seconds. Auto-Focus restored minimized REAPER
+  and brought it forward, observed before any manual activation. Export and
+  imported copy have identical SHA256, retain PCM24/48 kHz/stereo, and their PCM
+  matches a contiguous source segment exactly. This periodic sine fixture has
+  multiple identical segments, so byte matching alone does not prove selection
+  start accuracy. The UI displayed approximately 0.249–0.499 seconds.
+- Preferences open: `S` refused before publishing another durable slice; export
+  count remained four and the saved project hash was unchanged.
+- REAPER closed: `S` requested opening REAPER and did not launch another host.
+- **Undo failed.** After the whole import, Ctrl+Z and the Undo toolbar did not
+  remove it; Edit reported Can't undo. The item was removed explicitly only
+  from this owned synthetic project to isolate the region test. After the
+  region import, Edit again reported Can't undo, although a manual deletion had
+  previously created an undo point. Preferences showed a 256-MB Undo budget,
+  rather than disabled Undo. This suggests history invalidation during import;
+  its mechanism and version dependence remain unproven.
+
+The earlier inspector-backed Undo result is insufficient: it did not establish
+the behavior of a standalone native import without a script context. Do not
+claim native Undo or complete delivery on that evidence. `local_release/`
+retains the previously accepted companion build. No installation, tag or release
+was performed. The layout and normal runtime data were not changed. Owned apps
+closed normally and the profile lease was released.
+
+Next: reproduce import/Undo with a pre-existing ordinary edit in an owned
+project, comparing a simple ASCII WAV and the Unicode/# fixture, before and
+after saving. Compare documented native packet options in an isolated probe
+against the [official transport example](https://www.reaper.fm/download-old.php?ver=5x);
+do not assume an option fixes Undo or add compensating synthetic edits. If the
+native protocol cannot preserve history, evaluate a native REAPER extension
+before changing the agreed integration architecture. Reuse the accepted package
+startup result if artifacts stay unchanged; a production fix requires affected
+checks, a new release payload and fresh native/installation acceptance.
+
+Private evidence: `button-whole.rpp`, `button-undo.rpp` (still contains one item;
+the filename denotes an attempted Undo), and `s-region.rpp` in owned run
+`f45b6201420b4851a75151d19f74304c`; `wave-acceptance.json`,
+`popup-before.json`, `application-acceptance.json` and `portable-final.log` in
+`.rust-validation/reaper-native-probe/`. Real multiple-instance ambiguity and
+foreground-denial cases were not exercised in this session.

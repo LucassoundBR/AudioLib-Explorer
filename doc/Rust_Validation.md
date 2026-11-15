@@ -1920,7 +1920,9 @@ publication was made.
 
 The native transport proof passed against REAPER 7.85 with the persistent Dummy
 Audio test profile: whole 48 kHz/24-bit stereo WAV and prepared 250-ms region,
-Unicode/quotes/# in filenames, exact delivered SHA256 and whole-file Undo.
+Unicode/quotes/# in filenames and exact delivered SHA256. The inspector-backed
+whole-file Undo observation was not independent native acceptance; the later
+application check below supersedes that conclusion.
 The normal REAPER preferences and synthetic original hashes remained unchanged.
 See [native plan and experiments](REAPER_Native_Send_Plan.md), including the
 failed Preferences-readiness hypothesis and subsequent popup-guard pass.
@@ -1972,3 +1974,56 @@ verified before any source I/O/native message. No app-level insertion or focus
 pass is inferred. The host was preserved in the background, not terminated or
 relaunched. Cache pruning remains deferred to the delivery acceptance/install
 boundary; retained caches support the pending checks without another rebuild.
+
+### Native application acceptance: delivery withheld
+
+In the subsequently authorized interactive window, the unchanged packaged
+candidate from source `35c393b` passed `validate-portable.ps1 -BinaryDirectory
+dist/latest/portable -CleanCheckout`. This covers packaged identity/sidecars,
+isolated first startup and scan, CLI statistics, Chinese UI startup/exit,
+invalid-settings diagnostics, notices and unchanged source. The archived package
+and desktop hashes above remain applicable; no Rust compilation was repeated.
+
+REAPER 7.85 reused the persistent Dummy Audio profile. Its enabled evaluation
+control was dismissed normally. No Lua/companion was loaded. The packaged app
+used an isolated one-file library, `default-v2`/Classic player, volume zero and
+an intentionally unavailable audition device. The resulting audition-device
+error during Waveform selection was expected; no physical audio was reproduced.
+
+- Whole-file Send button passed: exactly one item at 2.5 seconds, length 1 second,
+  with exact original WAV SHA256. Auto-Focus off left AudioLib foreground.
+- Region `S` passed: exactly one item at the current 3-second cursor, 12,015
+  frames/250.3125 ms. PCM24/48 kHz/stereo and exact source-segment samples were
+  preserved, and REAPER's imported copy matches the export SHA256. The periodic
+  synthetic signal permits multiple equivalent source offsets, so this alone
+  does not prove absolute selection start accuracy.
+- Auto-Focus on restored minimized REAPER to foreground, observed before any
+  manual activation. Preferences-open rejection occurred before a new durable
+  export; four existing exports and saved-project hash remained unchanged.
+  Closed REAPER was not launched by `S`; the app reported the absent destination.
+- **Undo failed:** the first import could not be undone with Ctrl+Z or toolbar;
+  Edit showed Can't undo. A manual deletion isolated the next case. After the
+  region import, Edit again showed Can't undo. Undo preferences were enabled
+  with 256 MB. History invalidation by import is a hypothesis, not a proven cause.
+  The earlier script-inspector result does not override this independent failure.
+
+Both owned applications closed normally and the profile lease was released.
+Multiple-instance and foreground-denial acceptance were not run. No normal
+profile-identity claim is made for this session because a new starting hash was
+not captured; only the dedicated profile was launched. Synthetic source SHA256
+remains `d352c607cc16f87c85ae66be4118cdfd86ef2ae287bb138bc0c73ec0520b53d7`.
+
+Complete delivery is **not accepted**. The fixed `local_release/` installation
+was left unchanged (desktop SHA256
+`b2ea29e23073f758347d66892effe379dbfbc30f138bfaedb7e00fc0a10ce329`).
+No installation or publication was attempted. No Rust build/test ran in this
+session, so the prior fast-development cache-maintenance result remains
+applicable and pruning was not repeated. No source, dependencies, schema or
+device backend changed; their previously recorded checks remain valid within
+their documented scope.
+
+See [next diagnostic and evidence](REAPER_Native_Send_Plan.md#milestone-4-application-acceptance-delivery-withheld-2026-11-15).
+Private receipts: `.rust-validation/reaper-native-probe/application-acceptance.json`,
+`wave-acceptance.json`, `portable-final.log`; owned project snapshots under run
+`f45b6201420b4851a75151d19f74304c`. Correct independent Undo preservation before
+rebuilding/installing a revised candidate. No release/tag/merge is authorized.
