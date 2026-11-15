@@ -8,6 +8,14 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 **Current Phase**: Rust desktop implementation. Legacy Python source and its test scripts have been removed; previous committed versions preserve that history. The original database and local YAML configuration remain read-only migration inputs.
 
+## Shared desktop and REAPER testing
+
+The user regularly works on this computer while Codex runs. Default to CLI/file/DSP checks that do not activate windows, inject input, change the clipboard or play audio. Native GUI setup, Auto-Focus and UI interaction need an explicitly agreed interactive test window or a separate test desktop/session. An agreed window authorizes the routine steps within that scope; do not ask again for each click.
+
+`tools/test-reaper-send.ps1` is read-only by default. `-PrepareProfile` prepares the persistent owned profile without launching REAPER. Native runs/resumes require `-Interactive`; foreground activation additionally requires `-TestFocus`. These flags are not permission by themselves: do not add them while the user is working without the agreed window. Reuse `.rust-validation/reaper-profile`, with one owned instance at a time; keep projects, synthetic WAVs and queues isolated per run.
+
+REAPER evaluation startup has a countdown before Still Evaluating is enabled, plus an initial audio-device prompt. In an authorized GUI session, observe readiness, wait for the enabled control and handle known notices using supported computer-use tools. Preserve evaluation/licensing state and the user's audio configuration. An unexpected dialog during background work means stop UI interaction, retain diagnostics and defer the affected check. Never spawn repeated instances to get past startup. See [Shared desktop test workflow](doc/Shared_Desktop_Testing.md).
+
 ## Rust Workflow (Primary)
 
 The current implementation is the Cargo workspace at the repository root. See `doc/Rust_Architecture.md` for its contracts and `doc/Rust_Validation.md` for actual verification results. Python architecture examples in retained design specifications are historical guidance; do not use SQLAlchemy ORM, tkinter, PyQt6, or Alembic for new Rust functionality.
@@ -138,6 +146,17 @@ Use **Waveform**, **Metadata**, **FTS5** and **DAW** consistently. State the pri
 Validate user inputs through Rust core contracts, bind SQL values, validate real file targets against configured scan roots, and cap search queries at 500 characters. Chinese indexing uses jieba-rs with the shared audio terminology dictionary. Preserve unknown extension Metadata and user annotations during migration and rescanning. Playlist/project-reference data is retained, while new editors, DAW parsers and plugins remain deferred; hide unimplemented entry points. Server mode exists through `audiolib-remote` and `server/audiolib-server`: clients open validated read-only snapshot caches and send supported Metadata and management writes through HTTP APIs bound to library identity, actual format and permissions. Owned caches may apply validated server replies; remote sync and migration never change the client's local working library. Never log or export the token or WebDAV password.
 
 ## Git Workflow
+
+### User fork and milestone commits
+
+The user requested a commit after each completed, validated milestone. Keep
+commits scoped and record the relevant validation. Publish this project's
+requested development updates to `LucassoundBR/AudioLib-Explorer`, on a feature
+branch; preserve the original repository as upstream. Do not push directly to
+the original project, merge branches or publish release assets without a
+separate request. Exclude local libraries, credentials, settings, caches and
+private validation output from commits.
+
 ### Beta flow
 - `beta` is the integration branch. Feature/fix PRs target `beta`; `main` only receives merges from `beta` (or hotfix branches) after beta testing passes. Both branches are protected: PR required (0 approvals), required check `Linux (fmt)`, no force push or deletion; admins are not enforced so release operations still work.
 - Beta pre-releases are tagged `vX.Y.Z-beta.N` on `beta` (X.Y.Z = `Cargo.toml` version) and published as GitHub pre-releases (`check-release.ps1`, `ci-release.ps1`, `package-server.ps1` accept the suffix; suffixed tags are always `--prerelease`).
