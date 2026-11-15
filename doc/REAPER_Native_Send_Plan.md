@@ -194,3 +194,65 @@ the filename denotes an attempted Undo), and `s-region.rpp` in owned run
 `popup-before.json`, `application-acceptance.json` and `portable-final.log` in
 `.rust-validation/reaper-native-probe/`. Real multiple-instance ambiguity and
 foreground-denial cases were not exercised in this session.
+
+## Milestone 5: Undo diagnosis and native extension proof (2026-11-15)
+
+An authorized diagnostic session isolated the missing Undo entry from filename
+and save behavior. In the same persistent Dummy Audio profile, adding a track
+normally produced an enabled Undo "Add new track". A one-second ASCII WAV sent
+through the existing `0x100` transport inserted successfully but left that
+previous Undo entry unchanged, before saving. An isolated probe using documented
+`START:0`/`LENGTH:1` options behaved the same. Invoking Undo from the visible menu
+then removed the previously created track and its imported media. Therefore the
+observed defect is a missing independent import Undo entry; the earlier inference
+that native import necessarily clears all history is not established. Keyboard
+attempts alone were not used as proof of the resulting project state.
+
+`tools/reaper-undo-extension.rs` is a **standalone experimental extension**, not
+part of the application build/package or daily REAPER installation. It uses the
+[official extension ABI](https://github.com/justinfrankel/reaper-sdk/blob/main/sdk/reaper_plugin.h)
+and host-resolved `InsertMedia`, `Undo_BeginBlock2`/`Undo_EndBlock2`, project/item
+queries and cursor APIs. A private hidden receiver executes one synchronous
+transaction on REAPER's main thread. It checks a bounded NUL-terminated absolute
+WAV path, exactly one selected track, main-window readiness and reentrancy. It
+does not use Lua, simulate edits, inject input, activate windows or run a network
+listener. This proof requires installing a DLL in REAPER and restarting the host;
+that is an integration/setup tradeoff, not equivalent to zero host setup.
+
+Strict standalone Clippy and compilation passed without Slint. The DLL was
+loaded only from the dedicated profile's `UserPlugins/`. Whole-file and region
+requests used explicit owned PID/start identity through a private adapted probe.
+No production companion or inspection script was loaded. Native menu actions and
+independently saved RPP snapshots established:
+
+| State | Tracks | Items | Edit cursor (s) |
+| --- | ---: | ---: | ---: |
+| Whole insert, saved | 2 | 2 | 5.25031250005122 |
+| Undo whole, saved | 2 | 1 | 5.25031250005122 |
+| Redo whole, saved | 2 | 2 | 5.25031250005122 |
+| Region insert, saved | 2 | 3 | 5.25031250005122 |
+| Undo region, saved | 2 | 2 | 5.25031250005122 |
+
+The pre-existing item and ordinary track-creation history survived the extension
+Undo; the menu exposed the insertion-specific description and corresponding
+Redo. The whole request used the Unicode/quotes/# source; the region used the
+previously accepted 12,015-frame PCM24/48-kHz/stereo export. Playback remained
+stopped with Dummy Audio. Owned REAPER closed normally. Evidence is
+`undo-extension-results.json` and `extension-*.rpp` in the existing ignored run.
+
+This establishes the native extension approach, **not a delivered app fix**.
+The existing button/S still uses the earlier transport. Daily installation and
+UI are unchanged. A preference question is pending because the proof introduces
+a host DLL dependency: integrate the extension with explicit setup, or continue
+researching a solution with no host installation. Do not silently install a DLL
+in the user's normal profile. Before shipping, the receiver/client protocol,
+lifecycle, failure cases, installation/update path and package acceptance need
+production integration and verification. No whole desktop rebuild is justified
+until that implementation is ready.
+
+Reproduce compilation in the configured project toolchain:
+
+```powershell
+rustfmt --edition 2024 --check tools/reaper-undo-extension.rs
+clippy-driver --edition 2024 --crate-type cdylib -D warnings tools/reaper-undo-extension.rs -o .rust-validation/reaper-native-probe/reaper_audiolib_undo_proof.dll
+```

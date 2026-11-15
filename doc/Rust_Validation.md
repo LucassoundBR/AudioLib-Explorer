@@ -2027,3 +2027,35 @@ Private receipts: `.rust-validation/reaper-native-probe/application-acceptance.j
 `wave-acceptance.json`, `portable-final.log`; owned project snapshots under run
 `f45b6201420b4851a75151d19f74304c`. Correct independent Undo preservation before
 rebuilding/installing a revised candidate. No release/tag/merge is authorized.
+
+### Undo diagnosis and native extension proof
+
+The next authorized session reproduced the defect before saving with an ASCII
+WAV: stock `WM_COPYDATA` inserted media but left the existing Undo "Add new
+track" entry unchanged. Documented START/LENGTH options did not add a separate
+entry either. Invoking the visible Undo menu removed that earlier track and its
+imported media. This narrows the confirmed defect to a missing import Undo point;
+it does not prove that every import clears the entire history.
+
+The experimental `tools/reaper-undo-extension.rs` compiled as a standalone x64
+DLL and passed strict standalone Clippy and rustfmt. Only the dedicated test
+profile loaded it. Public REAPER APIs bracketed insertion with an Undo block and
+restored the cursor. Independent saved RPP inspection showed whole insert/Undo/
+Redo item counts 2/1/2 with two tracks retained; region insert/Undo counts were
+3/2. The cursor remained 5.25031250005122 seconds throughout. The menu exposed
+insertion-specific Undo and Redo, including after saving. No Lua, inspection
+script or physical playback was used. See [milestone 5](REAPER_Native_Send_Plan.md#milestone-5-undo-diagnosis-and-native-extension-proof-2026-11-15).
+
+The owned host closed normally and the exact verified proof DLL was removed
+from the test profile; its build artifact remains private. The proof is not
+integrated with button/S, shipped, or installed into the daily profile. A user
+preference is pending because this solution adds a native host DLL setup/restart
+requirement. The current application and fixed installation remain unchanged.
+Desktop, database, server and audio-backend checks were not repeated for this
+standalone experiment. No full application compilation or packaging ran.
+
+Budgeted cache maintenance was attempted after standalone compilation but
+reported blocked: another managed build/test/release or cleanup held the lease.
+No cache was removed or process terminated. This run did not measure a new
+logical cache size or establish that the 40-GiB budget is currently met. Preserve
+diagnostics and retry maintenance after the unrelated lease is released.

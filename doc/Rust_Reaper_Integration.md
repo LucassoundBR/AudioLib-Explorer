@@ -186,3 +186,9 @@ for exact artifacts, checks and unverified cases. A production fix requires
 affected source checks, a revised release payload and independent native
 acceptance before installation; workflow-only changes do not require rebuilding
 the unchanged candidate.
+
+The subsequent [Undo diagnostic/native extension proof](REAPER_Native_Send_Plan.md#milestone-5-undo-diagnosis-and-native-extension-proof-2026-11-15)
+demonstrated independent insertion Undo/Redo using the public REAPER API without
+Lua. It is a test-only DLL proof, not the button/S implementation. Production
+integration is pending a decision on requiring a host extension installation;
+the accepted daily installation is unchanged.
