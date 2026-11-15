@@ -21,8 +21,27 @@ static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug)]
 pub(crate) struct Delivery {
     pub project: String,
-    pub position: f64,
+    pub position: Option<f64>,
     pub window: String,
+}
+
+/// Transport is chosen before publication, never retried through another path.
+pub(crate) enum Destination {
+    Companion(Bridge),
+    Native(audiolib_windows::NativeReaper),
+}
+
+impl Destination {
+    pub fn send(&self, path: &Path, cancel: &AtomicBool) -> Result<Delivery, String> {
+        match self {
+            Self::Companion(bridge) => bridge.send(path, cancel),
+            Self::Native(target) => Ok(Delivery {
+                project: "REAPER".into(),
+                position: None,
+                window: target.send(path, cancel)?,
+            }),
+        }
+    }
 }
 
 /// Client belonging to one AudioLib data directory; all calls run on workers.
@@ -74,6 +93,15 @@ fn read(path: &Path) -> Result<String, String> {
 }
 
 impl Bridge {
+    /// An explicitly running companion remains an opt-in alternative. Otherwise
+    /// resolve one native destination before making a durable region export.
+    pub fn destination(self) -> Result<Destination, String> {
+        if self.connected().is_ok() {
+            Ok(Destination::Companion(self))
+        } else {
+            audiolib_windows::NativeReaper::discover().map(Destination::Native)
+        }
+    }
     /// Use only the caller's isolated AudioLib data directory.
     pub fn new(data_root: &Path) -> Self {
         Self {
@@ -217,7 +245,7 @@ impl Bridge {
                         }
                         Ok(Delivery {
                             project: unhex(lines[3])?,
-                            position,
+                            position: Some(position),
                             window: lines[5].into(),
                         })
                     } else {
@@ -292,7 +320,7 @@ mod tests {
         let result = bridge.send(&source, &AtomicBool::new(false)).unwrap();
         peer.join().unwrap();
         assert_eq!(result.project, "Projeto 音效");
-        assert_eq!(result.position, 2.5);
+        assert_eq!(result.position, Some(2.5));
         assert_eq!(result.window, "userdata: 123");
         assert_eq!(fs::read(source).unwrap(), b"original PCM");
     }

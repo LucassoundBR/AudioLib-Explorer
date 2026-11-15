@@ -367,8 +367,7 @@ impl Controller {
             let _worker = guard;
             let _busy = busy;
             let result = (|| -> Result<crate::reaper_bridge::Delivery, String> {
-                let bridge = crate::reaper_bridge::Bridge::new(&root);
-                bridge.connected()?;
+                let destination = crate::reaper_bridge::Bridge::new(&root).destination()?;
                 let path = if let (Some(selection), Some(ready)) = (range.as_ref(), ready) {
                     if !c.selection_current(selection) || selection.cancel.load(Ordering::Acquire) {
                         return Err("The selection changed; send it again".into());
@@ -403,7 +402,7 @@ impl Controller {
                 };
                 // Close drains slice workers before setting the final shutdown
                 // flag, so the close-intent flag must cancel this bounded wait.
-                bridge.send(&path, &c.closing)
+                destination.send(&path, &c.closing)
             })();
             post(c.ui.clone(), move |ui| match result {
                 Ok(delivery) => {
@@ -421,10 +420,13 @@ impl Controller {
                         .and_then(|n| n.to_str())
                         .filter(|name| !name.is_empty())
                         .unwrap_or("REAPER project");
-                    ui.set_status(
-                        format!("Sent to {name} at {:.3} s{focus_status}", delivery.position)
-                            .into(),
-                    );
+                    let status = match delivery.position {
+                        Some(position) => {
+                            format!("Sent to {name} at {position:.3} s{focus_status}")
+                        }
+                        None => format!("REAPER accepted native import request{focus_status}"),
+                    };
+                    ui.set_status(status.into());
                 }
                 Err(error) => ui.set_status(error.into()),
             });

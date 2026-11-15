@@ -133,6 +133,8 @@ fn native_send(pid: u32, started: u64, bytes: &[u8]) -> Result<&'static str, Str
         fn GetWindowThreadProcessId(window: Handle, pid: *mut u32) -> u32;
         fn GetClassNameW(window: Handle, class: *mut u16, size: i32) -> i32;
         fn IsWindowEnabled(window: Handle) -> i32;
+        fn GetLastActivePopup(window: Handle) -> Handle;
+        fn IsWindowVisible(window: Handle) -> i32;
         fn SendMessageTimeoutW(
             window: Handle,
             message: u32,
@@ -223,6 +225,8 @@ fn native_send(pid: u32, started: u64, bytes: &[u8]) -> Result<&'static str, Str
             && exit_code == 259
             && owner == pid
             && IsWindowEnabled(window) != 0
+            && (GetLastActivePopup(window) == window
+                || IsWindowVisible(GetLastActivePopup(window)) == 0)
     };
     if !ready {
         return Err("Owned REAPER exited or its main window is blocked by a dialog".into());

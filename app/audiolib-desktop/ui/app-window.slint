@@ -2835,7 +2835,7 @@ export component AppWindow inherits Window {
                 background: Theme.panel; border-color: Theme.border; border-width: 1px; border-radius: 8px;
                 VerticalLayout { padding: 20px * Theme.ui-scale; spacing: 12px * Theme.ui-scale;
                     Text { text: root.chinese ? "连接 REAPER" : "Connect REAPER"; color: Theme.ink; font-size: Theme.font(18); }
-                    Text { text: root.chinese ? "在 REAPER 的 Actions 窗口中，选择 New action → Load ReaScript，载入下方脚本，然后运行。每次 REAPER 会话只需运行一次。" : "In REAPER, open Actions → Show action list → New action → Load ReaScript. Load the script below, then run it once per REAPER session."; wrap: word-wrap; color: Theme.ink; font-size: Theme.font(13); }
+                    Text { text: root.chinese ? "无需脚本：打开一个 REAPER 实例并按 S。可选桥接：通过 Actions → New action → Load ReaScript 载入下方脚本并运行。" : "No script needed: open one REAPER instance and press S. Optional companion: load the script below via Actions → New action → Load ReaScript, then run it."; wrap: word-wrap; color: Theme.ink; font-size: Theme.font(13); }
                     TextInput { text: root.reaper-script-path; read-only: true; single-line: false; wrap: char-wrap; color: Theme.ink; font-size: Theme.font(12); accessible-label: "REAPER companion script path"; }
                     Text { text: root.chinese ? "选择目标轨道并放置编辑光标，然后在 AudioLib 中按 S。试听 Pitch、Rate 和音量不会改变发送的原始音频。" : "Select a destination track and place the edit cursor, then press S in AudioLib. Audition Pitch, Rate and monitoring volume do not alter the original audio sent."; wrap: word-wrap; color: Theme.dim; font-size: Theme.font(12); }
                     HorizontalLayout { spacing: 8px;

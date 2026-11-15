@@ -110,3 +110,11 @@ that this transport does not return. Missing-track, multi-instance, modal and
 Auto-Focus cases require separate application acceptance; they are not inferred
 from the successful whole/region transport checks. Evidence is retained in the
 ignored run `f45b6201420b4851a75151d19f74304c`.
+
+The first Preferences-window guard experiment failed: the main HWND remained
+enabled and native import succeeded while Preferences was open. The hypothesis
+that enabled main HWND implied readiness was rejected. Adding a visible
+last-active-popup check then refused a send with the same Preferences window
+open. This extra condition is applied before region publication and rechecked
+at dispatch in the production adapter. This is a recorded failed experiment,
+not a passing modal test for the earlier prototype revision.

@@ -1,29 +1,39 @@
 # REAPER send integration
 
-AudioLib sends to an already-running REAPER session through a companion ReaScript.
+AudioLib sends to an already-running REAPER session through native Windows import.
 It never launches REAPER, changes its audio driver or starts playback. Windows is
 the initial supported platform. No extension, web server or network port is needed.
 
 ## Setup and use
 
-1. Click **Connect REAPER…** beside the waveform. AudioLib writes the companion
-   into its own data directory and displays its exact path. **Show script in
-   folder** opens that location only when clicked.
-2. In REAPER, use **Actions → Show action list → New action → Load ReaScript**.
-   Load `AudioLib_Explorer_Bridge.lua`, then run it once per REAPER session.
-   Keep only one bridge session running for this AudioLib data directory.
+1. Open one REAPER instance and finish startup. No script is required.
+2. Keep only the intended destination instance open. Native discovery rejects
+   multiple or unverifiable REAPER windows instead of guessing. The app rechecks
+   process creation time, executable and HWND immediately before native send.
 3. Select a destination track in REAPER and place the edit cursor.
 4. Select a local file in AudioLib and click **Send to REAPER · S**, or press `S`
    outside text editors. An active waveform region sends that region instead;
    wait for its original-quality export to finish preparing first.
 5. Enable **Focus REAPER after send** to request foreground activation after
-   REAPER confirms insertion. The default is off and the choice lasts for the
-   current AudioLib session. Windows may deny activation; insertion still succeeds.
+   REAPER accepts the import request. The default is off and the choice lasts for the
+   current AudioLib session. Windows may deny activation; focus failure never
+   triggers another import attempt.
 
-REAPER imports into the currently selected track at its edit cursor, leaves that
-cursor in place and records an undo operation. The selected track/project at the
-moment REAPER processes the request is the destination. If none is selected, the
-bridge reports an error instead of guessing. An unsaved project is supported.
+The active project and selected track when REAPER processes native import are
+the destination. Import follows REAPER preferences, including cursor advancement
+and behavior when no track is selected. A completed native message does not
+provide project/cursor/item-count telemetry; the status reports acceptance of
+the request without inventing an insertion receipt. Unsaved projects are supported.
+
+### Optional companion alternative
+
+**Connect REAPER…** still displays the optional companion path. Load and run it
+through **Actions → Show action list → New action → Load ReaScript** if its
+explicit project/cursor acknowledgement and cursor preservation are preferred.
+A fresh companion for the current AudioLib data directory is selected before
+submission; otherwise native discovery is used. No transport is tried after a
+failed or uncertain submission to the other. The companion requires a selected
+track and restores the cursor. Keep one companion session per data directory.
 
 ## Audio and file lifetime
 
@@ -42,11 +52,21 @@ bridge reports an error instead of guessing. An unsaved project is supported.
 
 ## Delivery and failure handling
 
-The local bounded UTF-8 protocol uses hex-encoded paths, a session heartbeat,
+Native import sends one bounded synchronous `WM_COPYDATA` request with `dwData`
+`0x100`, a NUL-terminated UTF-8 path and `#NOTAB#`, using a two-second Windows
+timeout on a worker. No input, process launch, clipboard or broadcast is used.
+Timeout/zero receiver results are unconfirmed and never retried automatically.
+Finish startup and close active REAPER dialogs before sending. Native readiness
+checks both the main window and its last active visible popup, including the
+modeless Preferences window, before publishing a durable region and again before
+dispatch. Minimized main windows remain valid destinations for optional Auto-Focus.
+
+The optional local bounded UTF-8 companion protocol uses hex-encoded paths, a session heartbeat,
 single-client file lock, unique request IDs, atomic request publication/claim and
 an acknowledgement with project/cursor/window identity. The client waits up to
 12 seconds on a worker; no audio callback performs this work. Missing/stale
-companions fail before making a durable region copy. Closing AudioLib cancels
+companions fall back to native discovery before making a durable region copy.
+Closing AudioLib cancels
 the wait and drains the owned worker.
 
 An unconfirmed request is never retried automatically: REAPER may have imported

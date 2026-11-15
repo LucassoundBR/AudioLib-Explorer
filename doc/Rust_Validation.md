@@ -1915,3 +1915,37 @@ installed CLI version (`1.0.0`) and isolated desktop startup. The installation
 receipt is `.rust-validation/local-install/b9209b254e794b74ade8f21a7ec62297/report.json`.
 Normal runtime data/preferences were preserved. No Git commit, tag or remote
 publication was made.
+
+## 2026-11-15 Native REAPER integration candidate
+
+The native transport proof passed against REAPER 7.85 with the persistent Dummy
+Audio test profile: whole 48 kHz/24-bit stereo WAV and prepared 250-ms region,
+Unicode/quotes/# in filenames, exact delivered SHA256 and whole-file Undo.
+The normal REAPER preferences and synthetic original hashes remained unchanged.
+See [native plan and experiments](REAPER_Native_Send_Plan.md), including the
+failed Preferences-readiness hypothesis and subsequent popup-guard pass.
+
+The app now resolves native import when no explicit companion is running,
+retains existing button/S/layout/export behavior, and reports native acceptance
+without fabricating project or cursor telemetry. A fresh companion remains an
+optional preselected alternative, never a retry after an uncertain native send.
+
+Automated candidate checks passed on Rust 1.97.1 MSVC:
+
+- Workspace formatting and strict Clippy for desktop/Windows all targets.
+- Four Windows REAPER tests (three native packet/selection/cancellation tests
+  and the existing focus-pointer parser). Final Windows strict Clippy and those
+  four tests were repeated after the private popup guard changed.
+- Six desktop REAPER tests, including real Controller/file-peer export lifetime,
+  close cancellation and S editing/modal guards. Two helper/visual-export cases
+  are ignored by the normal run; the isolated child is executed by its parent.
+  Desktop/controller/UI source and public interfaces did not change after this
+  passing run; the final Windows-only guard update does not invalidate these
+  companion-peer/offscreen results. Native application acceptance remains separate.
+- Five standalone probe tests and strict standalone Clippy.
+
+No audio backend, slice encoder, schema, database writes, server contract,
+dependency or packaging-script behavior changed. Their relevant recorded
+baselines remain applicable; unrelated device/data/performance suites were not
+rerun. Build, packaged startup, native button/S/Auto-Focus and fixed installation
+are pending for this candidate; no earlier application pass substitutes for them.
