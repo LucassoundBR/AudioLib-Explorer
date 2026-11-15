@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["crates/audiolib-core", "crates/audiolib-ai", "crates/audiolib-db", "crates/audiolib-audio", "crates/audiolib-windows", "crates/audiolib-ipc", "app/audiolib-desktop", "app/audiolib-cli", "crates/audiolib-remote", "crates/audiolib-update", "server/audiolib-server"]
-exclude = ["vendor/libsqlite3-sys"]
+exclude = ["vendor/libsqlite3-sys", "tools/fast-tests"]
 
 [workspace.package]
 version = "1.0.0"
@@ -57,3 +57,13 @@ libsqlite3-sys = { path = "vendor/libsqlite3-sys" }
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+# Opt-in development preview. Keeps dev assertions and overflow checks.
+# Delivery scripts continue to use release; never install preview as local_release.
+[profile.preview]
+inherits = "dev"
+opt-level = 0
+debug = 1
+incremental = true
+codegen-units = 256
+lto = "off"

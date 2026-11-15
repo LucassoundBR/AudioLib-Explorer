@@ -3,7 +3,7 @@
 .SYNOPSIS
 Preview or prune owned Cargo build caches; never clean source or application data.
 .DESCRIPTION
-Default budget: 40 logical GiB, debug profiles only. MaxGiB=0 clears every
+Default budget: 40 logical GiB, development profiles (debug/preview) only. MaxGiB=0 clears every
 eligible candidate of the chosen mode. Cargo home, SDKs, packages, installed
 applications and validation evidence are not candidates. No process is stopped.
 External target directories need Register; nonempty adoption is explicit.
@@ -56,7 +56,7 @@ try {
     $entries=@(Get-ChildItem -LiteralPath $TargetDirectory -Force)
     foreach($entry in $entries){
         if($entry.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Linked build target entry.'}
-        $known=if($entry.PSIsContainer){$entry.Name -in @('debug','release','doc','tmp') -or $entry.Name -match '^[A-Za-z0-9_]+-[A-Za-z0-9_-]+$'}else{$entry.Name -in @('CACHEDIR.TAG','.rustc_info.json','.audiolib-build-owner.json','.cargo-lock','.DS_Store') -or $entry.Name -match '^\.audiolib-.*\.lock$'}
+        $known=if($entry.PSIsContainer){$entry.Name -in @('debug','preview','release','doc','tmp') -or $entry.Name -match '^[A-Za-z0-9_]+-[A-Za-z0-9_-]+$'}else{$entry.Name -in @('CACHEDIR.TAG','.rustc_info.json','.audiolib-build-owner.json','.cargo-lock','.DS_Store') -or $entry.Name -match '^\.audiolib-.*\.lock$'}
         if(!$known){throw "Unrecognized build target entry: $($entry.Name)"}
     }
     if((Test-Path -LiteralPath $ownerPath) -and (Get-Item -LiteralPath $ownerPath -Force).Length -gt 16384){throw 'Invalid oversized cache ownership marker.'}
@@ -87,9 +87,9 @@ try {
     }
     $profiles=@()
     foreach($entry in $entries|Where-Object PSIsContainer){
-        if($entry.Name -in @('debug','release','doc','tmp')){$profiles+=,$entry}
+        if($entry.Name -in @('debug','preview','release','doc','tmp')){$profiles+=,$entry}
         elseif($entry.Name -notin @('doc','tmp')){
-            foreach($name in @('debug','release','doc','tmp')){ $path=Join-Path $entry.FullName $name;if(Test-Path -LiteralPath $path -PathType Container){Assert-AudioLibUnlinkedPath $path;$profiles+=, (Get-Item -LiteralPath $path)} }
+            foreach($name in @('debug','preview','release','doc','tmp')){ $path=Join-Path $entry.FullName $name;if(Test-Path -LiteralPath $path -PathType Container){Assert-AudioLibUnlinkedPath $path;$profiles+=, (Get-Item -LiteralPath $path)} }
         }
     }
     foreach($profile in $profiles){
@@ -102,7 +102,7 @@ try {
         }
         $report.before_bytes+=$size
         $path=if($Mode -eq 'Incremental'){$incremental}else{$profile.FullName}
-        $selected=($Mode -eq 'All' -or $Mode -eq 'Incremental' -or $profile.Name -eq 'debug') -and (Test-Path -LiteralPath $path -PathType Container) -and $latest -le [DateTime]::UtcNow.AddDays(-$OlderThanDays)
+        $selected=($Mode -eq 'All' -or $Mode -eq 'Incremental' -or $profile.Name -in @('debug','preview')) -and (Test-Path -LiteralPath $path -PathType Container) -and $latest -le [DateTime]::UtcNow.AddDays(-$OlderThanDays)
         if($selected){$report.candidates+=,[ordered]@{path=$path;bytes=$(if($Mode -eq 'Incremental'){$incrementalSize}else{$size});last_write_utc=$latest.ToString('o');status='eligible'}}
     }
     $report.remaining_bytes=$report.before_bytes
