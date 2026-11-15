@@ -6,8 +6,10 @@ use std::path::PathBuf;
 
 mod documents;
 mod drag;
+mod reaper_focus;
 pub use documents::documents_directory;
 pub use drag::{DragOutcome, drag_files, primary_button_down};
+pub use reaper_focus::focus_reaper;
 
 /// Main-thread interception of native macOS Quit through the desktop close drain.
 #[cfg(target_os = "macos")]

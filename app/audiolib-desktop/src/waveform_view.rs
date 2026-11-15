@@ -2,8 +2,10 @@
 //! Waveform viewport and pixel rendering, independent of transport processing.
 use audiolib_audio::{SPECTRAL_PEAK_BASE, WaveformData, spectral_color};
 
-const SPECTRAL_BACKGROUND: [u8; 4] = [132, 144, 148, 255];
-const NORMAL_BACKGROUND: [u8; 4] = [29, 35, 40, 255];
+// Slate still separates the intentionally black spectral noise peaks; ordinary
+// peaks use a near-black canvas for a stronger selection contrast.
+const SPECTRAL_BACKGROUND: [u8; 4] = [70, 80, 84, 255];
+const NORMAL_BACKGROUND: [u8; 4] = [16, 20, 24, 255];
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct WaveView {

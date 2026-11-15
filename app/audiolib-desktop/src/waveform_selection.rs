@@ -254,6 +254,13 @@ impl Drop for Worker {
 }
 
 struct DragBusy(Arc<Controller>);
+struct ReaperBusy(Arc<Controller>);
+impl Drop for ReaperBusy {
+    fn drop(&mut self) {
+        self.0.reaper_busy.store(false, Ordering::Release);
+        post(self.0.ui.clone(), |ui| ui.set_reaper_busy(false));
+    }
+}
 impl Drop for DragBusy {
     fn drop(&mut self) {
         let mut state = self.0.slice.lock().unwrap();
@@ -288,6 +295,142 @@ fn selection_ui_clear(ui: &AppWindow) {
 }
 
 impl Controller {
+    pub(super) fn bind_reaper(self: &Arc<Self>, ui: &AppWindow) {
+        ui.set_reaper_supported(cfg!(windows));
+        let c = self.clone();
+        ui.on_reaper_send_requested(move || c.send_to_reaper());
+        let c = self.clone();
+        ui.on_reaper_setup_requested(move || {
+            let root = c.config.lock().unwrap().data_root();
+            let c = c.clone();
+            std::thread::spawn(move || {
+                let result = crate::reaper_bridge::Bridge::new(&root).install();
+                post(c.ui.clone(), move |ui| match result {
+                    Ok(path) => {
+                        ui.set_reaper_script_path(path.display().to_string().into());
+                        ui.set_reaper_setup_visible(true);
+                    }
+                    Err(error) => ui.set_status(error.into()),
+                });
+            });
+        });
+        let c = self.clone();
+        ui.on_reaper_reveal_requested(move || {
+            let path = c
+                .config
+                .lock()
+                .unwrap()
+                .data_root()
+                .join("reaper-bridge/AudioLib_Explorer_Bridge.lua");
+            if let Err(error) = audiolib_windows::reveal_path(&path) {
+                c.status(error.to_string());
+            }
+        });
+    }
+
+    fn send_to_reaper(self: &Arc<Self>) {
+        if !self.available() || self.reaper_busy.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let busy = ReaperBusy(self.clone());
+        let (range, ready) = {
+            let state = self.slice.lock().unwrap();
+            (state.selection.clone(), state.ready.clone())
+        };
+        if range.is_some() && ready.is_none() {
+            self.status(
+                self.localized(
+                    "切片尚在准备，请就绪后再发送",
+                    "The selection is still preparing; send it when ready",
+                )
+                .into(),
+            );
+            return;
+        }
+        let file = self.selected.lock().unwrap().clone();
+        let focus = self.ui.upgrade().is_some_and(|ui| {
+            ui.set_reaper_busy(true);
+            ui.set_status(
+                if self.chinese.load(Ordering::Acquire) {
+                    "正在发送到 REAPER…"
+                } else {
+                    "Sending to REAPER…"
+                }
+                .into(),
+            );
+            ui.get_reaper_auto_focus()
+        });
+        let root = self.config.lock().unwrap().data_root();
+        let c = self.clone();
+        let guard = Worker::new(self);
+        std::thread::spawn(move || {
+            let _worker = guard;
+            let _busy = busy;
+            let result = (|| -> Result<crate::reaper_bridge::Delivery, String> {
+                let bridge = crate::reaper_bridge::Bridge::new(&root);
+                bridge.connected()?;
+                let path = if let (Some(selection), Some(ready)) = (range.as_ref(), ready) {
+                    if !c.selection_current(selection) || selection.cancel.load(Ordering::Acquire) {
+                        return Err("The selection changed; send it again".into());
+                    }
+                    selection.source.check_local_version()?;
+                    if ready.local_source.as_ref().is_some_and(|(path, stamp)| {
+                        SourceStamp::read(path).ok().as_ref() != Some(stamp)
+                    }) {
+                        return Err("The original changed; select the range again".into());
+                    }
+                    let mut published = publish_numbered_slice(
+                        &ready.path,
+                        &ready.export_directory,
+                        &ready.stem,
+                        &selection.cancel,
+                    )?;
+                    // Once submission can occur, retain the file even if the reply
+                    // is lost: REAPER may already reference it. Never auto-retry.
+                    published.keep = true;
+                    published.path.clone()
+                } else {
+                    let file = file.ok_or("Select an audio file first")?;
+                    if file.missing {
+                        return Err("The selected original is unavailable".into());
+                    }
+                    if c.remote_read_only() && file.id > 0 {
+                        return Err("For a server sound, select a waveform region and wait for the original-quality WAV to be ready before sending".into());
+                    }
+                    let roots = c.config.lock().unwrap().allowed_scan_roots.clone();
+                    audiolib_core::validate_audio_path(Path::new(&file.file_path), &roots)
+                        .map_err(|e| e.to_string())?
+                };
+                // Close drains slice workers before setting the final shutdown
+                // flag, so the close-intent flag must cancel this bounded wait.
+                bridge.send(&path, &c.closing)
+            })();
+            post(c.ui.clone(), move |ui| match result {
+                Ok(delivery) => {
+                    let focus_status = if focus && !ui.get_closing() {
+                        match audiolib_windows::focus_reaper(&delivery.window) {
+                            Ok(true) => "",
+                            Ok(false) => " · Windows did not allow focus switching",
+                            Err(_) => " · Auto-Focus unavailable",
+                        }
+                    } else {
+                        ""
+                    };
+                    let name = Path::new(&delivery.project)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .filter(|name| !name.is_empty())
+                        .unwrap_or("REAPER project");
+                    ui.set_status(
+                        format!("Sent to {name} at {:.3} s{focus_status}", delivery.position)
+                            .into(),
+                    );
+                }
+                Err(error) => ui.set_status(error.into()),
+            });
+        });
+    }
+
     pub(super) fn slice_original_etag(&self, file: &AudioFile) -> Option<String> {
         self.slice
             .lock()

@@ -19,6 +19,9 @@ mod panic_diagnostics;
 #[cfg(test)]
 mod playback_repaint_tests;
 mod progressive_waveform;
+mod reaper_bridge;
+#[cfg(test)]
+mod reaper_ui_tests;
 #[cfg(test)]
 mod responsive_layout_tests;
 #[cfg(test)]

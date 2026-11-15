@@ -218,6 +218,137 @@ fn displayed_waveform_drives_slice_and_preview_even_with_another_inspector() {
 }
 
 #[test]
+fn reaper_send_keeps_original_and_region_identity_and_cancels_on_close() {
+    isolated("child_reaper_send");
+}
+
+#[test]
+#[ignore = "isolated REAPER file peer and close cancellation; no native window or audio output"]
+fn child_reaper_send() {
+    let f = fixture();
+    let root = f.c.config.lock().unwrap().data_root();
+    crate::reaper_bridge::Bridge::new(&root).install().unwrap();
+    let bridge = root.join("reaper-bridge");
+    let session = || {
+        std::fs::write(
+            bridge.join("session.txt"),
+            format!(
+                "ALE_REAPER_1\n{}\nuserdata: 123\n{}\n",
+                "a".repeat(32),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs()
+            ),
+        )
+        .unwrap();
+    };
+    let peer = || {
+        let bridge = bridge.clone();
+        std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let request = bridge.join("request.txt");
+            while !request.exists() {
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            let text = std::fs::read_to_string(&request).unwrap();
+            let lines: Vec<_> = text.lines().collect();
+            let path = String::from_utf8(
+                (0..lines[4].len())
+                    .step_by(2)
+                    .map(|i| u8::from_str_radix(&lines[4][i..i + 2], 16).unwrap())
+                    .collect(),
+            )
+            .unwrap();
+            std::fs::remove_file(&request).unwrap();
+            let pending = bridge.join("peer.pending");
+            std::fs::write(
+                &pending,
+                format!("ALE_REAPER_1\n{}\nOK\n\n2.5\nuserdata: 123\n", lines[2]),
+            )
+            .unwrap();
+            std::fs::rename(pending, bridge.join(format!("{}.reply", lines[2]))).unwrap();
+            PathBuf::from(path)
+        })
+    };
+    let original_a = std::fs::read(&f.a.file_path).unwrap();
+    let original_b = std::fs::read(&f.b.file_path).unwrap();
+    *f.c.selected.lock().unwrap() = Some(f.b.clone());
+    session();
+    let receiver = peer();
+    f.c.send_to_reaper();
+    let c = f.c.clone();
+    wait_for(&f.ui, move || {
+        !c.reaper_busy.load(Ordering::Acquire) && c.slice.lock().unwrap().workers == 0
+    });
+    assert_eq!(
+        receiver.join().unwrap(),
+        Path::new(&f.b.file_path).canonicalize().unwrap()
+    );
+
+    // The waveform deliberately describes A while the inspector still shows B.
+    let source = bind_displayed(&f);
+    let selected = selection(
+        source,
+        AudioFrameRange {
+            start_frame: 200,
+            end_frame: 600,
+            sample_rate: 1000,
+        },
+        1,
+        f.c.selection_generation.load(Ordering::Acquire),
+    );
+    {
+        let mut state = f.c.slice.lock().unwrap();
+        state.revision = 1;
+        state.selection = Some(selected.clone());
+    }
+    f.c.prepare_wave_slice(selected);
+    let c = f.c.clone();
+    wait_for(&f.ui, move || c.slice.lock().unwrap().ready.is_some());
+    let ready = f.c.slice.lock().unwrap().ready.clone().unwrap();
+    let expected = std::fs::read(&ready.path).unwrap();
+    session();
+    let receiver = peer();
+    f.c.send_to_reaper();
+    let c = f.c.clone();
+    wait_for(&f.ui, move || {
+        !c.reaper_busy.load(Ordering::Acquire) && c.slice.lock().unwrap().workers == 0
+    });
+    let exported = receiver.join().unwrap();
+    assert_eq!(std::fs::read(&exported).unwrap(), expected);
+    let info = audiolib_audio::probe(&exported).unwrap();
+    assert_eq!(
+        (info.frames, info.sample_rate, info.bit_depth, info.channels),
+        (400, 1000, 16, 1)
+    );
+    f.c.cancel_all_slices();
+    assert!(
+        exported.is_file(),
+        "REAPER's source must outlive temporary selection state"
+    );
+    drop(ready);
+    assert_eq!(std::fs::read(&f.a.file_path).unwrap(), original_a);
+    assert_eq!(std::fs::read(&f.b.file_path).unwrap(), original_b);
+
+    // Closing must cancel before shutdown, which only becomes true after drain.
+    session();
+    f.c.send_to_reaper();
+    let request = bridge.join("request.txt");
+    let observed = request.clone();
+    wait_for(&f.ui, move || observed.is_file());
+    assert!(!f.c.shutdown.load(Ordering::Acquire));
+    let start = Instant::now();
+    f.c.closing.store(true, Ordering::Release);
+    f.c.wait_slice_workers();
+    assert!(start.elapsed() < Duration::from_secs(2));
+    assert!(!request.exists());
+    assert!(!f.c.reaper_busy.load(Ordering::Acquire));
+    assert_eq!(f.c.audio.status().play_session_id, 0);
+}
+
+#[test]
 #[ignore = "isolated Waveform selection source and exact slice regression"]
 fn child_displayed_source() {
     let f = fixture();

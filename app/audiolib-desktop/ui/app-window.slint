@@ -928,7 +928,31 @@ component SourceFooter inherits Rectangle {
     TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { root.activated(); } }
     Tooltip { SourceStatusTip { text: root.text; available-width: root.tooltip-available-width; } }
 }
+component ReaperSendBar inherits HorizontalLayout {
+    in property <bool> chinese;
+    in property <bool> ready;
+    in property <bool> busy;
+    in property <bool> blocked;
+    in-out property <bool> auto-focus;
+    callback send(); callback setup();
+    spacing: 8px * Theme.ui-scale;
+    Action { width: 160px * Theme.ui-scale; label: root.busy ? (root.chinese ? "正在发送…" : "Sending…") : (root.chinese ? "发送到 REAPER · S" : "Send to REAPER · S"); enabled: root.ready && !root.busy && !root.blocked; clicked => { root.send(); } }
+    CheckBox { width: 170px * Theme.ui-scale; text: root.chinese ? "发送后切换到 REAPER" : "Focus REAPER after send"; checked <=> root.auto-focus; enabled: !root.busy && !root.blocked; }
+    Rectangle { horizontal-stretch: 1; }
+    Action { width: 135px * Theme.ui-scale; label: root.chinese ? "连接 REAPER…" : "Connect REAPER…"; enabled: !root.busy && !root.blocked; clicked => { root.setup(); } }
+}
+
 export component AppWindow inherits Window {
+    in property <bool> reaper-supported: false;
+    in property <bool> reaper-busy: false;
+    in-out property <bool> reaper-auto-focus: false;
+    in-out property <bool> reaper-setup-visible: false;
+    in property <string> reaper-script-path;
+    callback reaper-send-requested();
+    callback reaper-setup-requested();
+    callback reaper-reveal-requested();
+    property <bool> reaper-send-ready: root.reaper-supported && (root.wave-selection-active ? !root.wave-selection-preparing : root.has-selection && !root.selected-missing);
+    changed reaper-setup-visible => { if root.reaper-setup-visible { reaper-setup-dialog.focus(); } }
     private property <length> application-footer-height: max(20px * Theme.ui-scale, Theme.font(10) + 6px * Theme.ui-scale);
     private property <string> application-status-text: root.drag-preparing && root.drag-progress != "" ? root.drag-progress
         : root.remote-audition-status != "" ? root.remote-audition-status
@@ -2290,10 +2314,10 @@ export component AppWindow inherits Window {
     changed selected-id => { root.notes-visible = false; root.source-metadata-visible = false; }
     // A native menu remains outside the in-window overlays. Guard its items and
     // shortcuts too, so modal dialogs cannot launch overlapping operations.
-    property <bool> menu-ready: !root.startup-busy && !root.closing && !root.library-busy && root.lu-state == 0 && root.vi-state == 0 && !root.migration-visible && !root.library-visible && !root.confirmation-visible && !root.batch-visible && !root.import-visible && !root.settings-visible && !root.peaks-visible && !root.about-visible && !root.help-visible && !root.debug-visible && !root.update-visible && !root.search-task-rename-visible && !root.search-workspace-loading;
+    property <bool> menu-ready: !root.reaper-setup-visible && !root.startup-busy && !root.closing && !root.library-busy && root.lu-state == 0 && root.vi-state == 0 && !root.migration-visible && !root.library-visible && !root.confirmation-visible && !root.batch-visible && !root.import-visible && !root.settings-visible && !root.peaks-visible && !root.about-visible && !root.help-visible && !root.debug-visible && !root.update-visible && !root.search-task-rename-visible && !root.search-workspace-loading;
     // An AI batch may wait for its own task restore, but never bypass another blocker.
     out property <bool> ai-batch-blocked: root.lu-state != 0 || root.vi-state != 0 || root.migration-visible || root.startup-busy || root.closing || root.library-busy || root.library-visible || root.confirmation-visible || root.batch-visible || root.import-visible || root.settings-visible || root.peaks-visible || root.about-visible || root.help-visible || root.debug-visible || root.update-visible || root.search-task-rename-visible;
-    out property <bool> background-blocked: root.ai-batch-blocked || root.search-workspace-loading;
+    out property <bool> background-blocked: root.ai-batch-blocked || root.search-workspace-loading || root.reaper-setup-visible;
     in property <string> selected-id: "";
     property <AudioRow> context-file;
     property <FolderRow> context-folder;
@@ -2341,6 +2365,7 @@ export component AppWindow inherits Window {
         }
     }
     function dismiss-modal() {
+        if root.reaper-setup-visible { root.reaper-setup-visible = false; shortcuts.focus(); return; }
         if root.closing || root.library-busy { return; }
         if root.ai-visible && (!root.background-blocked || root.ai-batch-restoring) { root.ai-action(1,0); return; }
         if root.search-task-rename-visible { root.search-task-rename-visible = false; }
@@ -2367,6 +2392,7 @@ export component AppWindow inherits Window {
         else { root.filters-visible = false; }
     }
     function focus-library-modal() {
+        if root.reaper-setup-visible { reaper-setup-dialog.focus(); return; }
         if root.search-task-rename-visible && !root.closing {
             task-rename-input.focus();
         } else if root.update-visible && !root.closing {
@@ -2789,6 +2815,37 @@ export component AppWindow inherits Window {
             MenuItem { title: root.chinese ? "关于 AudioLib Explorer" : "About AudioLib Explorer"; enabled: root.menu-ready; activated => { root.about-visible = true; } }
         }
     }
+    reaper-setup-dialog := FocusScope {
+        x: 0px; y: 0px; width: root.width; height: root.height; z: 100;
+        visible: root.reaper-setup-visible; enabled: root.reaper-setup-visible;
+        forward-focus: reaper-script-reveal;
+        capture-key-pressed(event) => {
+            if event.text == Key.Escape { root.reaper-setup-visible = false; shortcuts.focus(); return accept; }
+            if event.text == Key.Tab || event.text == Key.Backtab {
+                if reaper-script-reveal.has-focus { reaper-setup-close.focus(); } else { reaper-script-reveal.focus(); }
+                return accept;
+            }
+            reject
+        }
+        Rectangle { background: Theme.overlay;
+            TouchArea { }
+            Rectangle {
+                width: min(640px * Theme.ui-scale, root.width - 32px); height: 300px * Theme.ui-scale;
+                x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+                background: Theme.panel; border-color: Theme.border; border-width: 1px; border-radius: 8px;
+                VerticalLayout { padding: 20px * Theme.ui-scale; spacing: 12px * Theme.ui-scale;
+                    Text { text: root.chinese ? "连接 REAPER" : "Connect REAPER"; color: Theme.ink; font-size: Theme.font(18); }
+                    Text { text: root.chinese ? "在 REAPER 的 Actions 窗口中，选择 New action → Load ReaScript，载入下方脚本，然后运行。每次 REAPER 会话只需运行一次。" : "In REAPER, open Actions → Show action list → New action → Load ReaScript. Load the script below, then run it once per REAPER session."; wrap: word-wrap; color: Theme.ink; font-size: Theme.font(13); }
+                    TextInput { text: root.reaper-script-path; read-only: true; single-line: false; wrap: char-wrap; color: Theme.ink; font-size: Theme.font(12); accessible-label: "REAPER companion script path"; }
+                    Text { text: root.chinese ? "选择目标轨道并放置编辑光标，然后在 AudioLib 中按 S。试听 Pitch、Rate 和音量不会改变发送的原始音频。" : "Select a destination track and place the edit cursor, then press S in AudioLib. Audition Pitch, Rate and monitoring volume do not alter the original audio sent."; wrap: word-wrap; color: Theme.dim; font-size: Theme.font(12); }
+                    HorizontalLayout { spacing: 8px;
+                        reaper-script-reveal := Action { label: root.chinese ? "显示脚本" : "Show script in folder"; clicked => { root.reaper-reveal-requested(); } }
+                        reaper-setup-close := Action { label: root.chinese ? "关闭" : "Close"; clicked => { root.reaper-setup-visible = false; shortcuts.focus(); } }
+                    }
+                }
+            }
+        }
+    }
     forward-focus: shortcuts;
     shortcuts := FocusScope {
         min-width: 0px; min-height: 0px; preferred-width: 1440px * Theme.ui-scale; preferred-height: 900px * Theme.ui-scale;
@@ -2805,6 +2862,9 @@ export component AppWindow inherits Window {
         }
         key-pressed(event) => {
             root.wave-selection-shift-held = event.modifiers.shift || event.text == Key.Shift;
+            if (event.text == "s" || event.text == "S") && !event.modifiers.control && !event.modifiers.alt && !event.modifiers.meta && !root.background-blocked && !root.reaper-busy && !root.wave-selection-gesture && root.reaper-send-ready {
+                root.reaper-send-requested(); return accept;
+            }
             if event.text == Key.Escape {
                 if root.dismiss-wave-selection() { return accept; }
                 root.dismiss-modal();
@@ -3617,6 +3677,12 @@ main-scroll := ScrollView {
             }
         }
 
+        ReaperSendBar {
+            height: root.reaper-supported ? 30px * Theme.ui-scale : 0px; visible: root.reaper-supported;
+            chinese: root.chinese; ready: root.reaper-send-ready; busy: root.reaper-busy; blocked: root.background-blocked;
+            auto-focus <=> root.reaper-auto-focus;
+            send => { root.reaper-send-requested(); } setup => { root.reaper-setup-requested(); }
+        }
         audition := AuditionPanel {
             selection-active: root.wave-selection-active; selection-start: root.wave-selection-start; selection-end: root.wave-selection-end;
             selection-identity: root.wave-selection-identity; selection-preparing: root.wave-selection-preparing; selection-progress: root.wave-selection-progress;
@@ -4484,6 +4550,12 @@ main-scroll := ScrollView {
             help: root.chinese ? "向上拖动展开波形，向下拖动收起" : "Drag up to expand the waveform; drag down to compact";
             enabled: !root.background-blocked;
             resized(value) => { root.audition-preferred-height = clamp(-value, 114px * Theme.ui-scale, 386px * Theme.ui-scale); root.audition-expanded = root.audition-preferred-height > 186px * Theme.ui-scale; }
+        }
+        ReaperSendBar {
+            height: root.reaper-supported ? 30px * Theme.ui-scale : 0px; visible: root.reaper-supported;
+            chinese: root.chinese; ready: root.reaper-send-ready; busy: root.reaper-busy; blocked: root.background-blocked;
+            auto-focus <=> root.reaper-auto-focus;
+            send => { root.reaper-send-requested(); } setup => { root.reaper-setup-requested(); }
         }
         studio-audition := AuditionPanel {
             selection-active: root.wave-selection-active; selection-start: root.wave-selection-start; selection-end: root.wave-selection-end;

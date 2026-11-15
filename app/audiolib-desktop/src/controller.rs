@@ -921,6 +921,7 @@ pub struct Controller {
     poll_wake: Condvar,
     /// A drag-out is being prepared (server downloads) or running.
     drag_busy: AtomicBool,
+    reaper_busy: AtomicBool,
     drag_cancel: Mutex<Arc<AtomicBool>>,
     /// Result-table thumbnail Waveforms (doc/api/README.md §9.3), one background worker.
     list_waveforms: ListWaveforms,
@@ -1207,6 +1208,7 @@ impl Controller {
             poll_signal: Mutex::new(0),
             poll_wake: Condvar::new(),
             drag_busy: AtomicBool::new(false),
+            reaper_busy: AtomicBool::new(false),
             drag_cancel: Mutex::new(Arc::new(AtomicBool::new(false))),
         });
         controller.bind(ui);
@@ -1239,6 +1241,7 @@ impl Controller {
         self.bind_artwork(ui);
         self.bind_search_v2_ux(ui);
         self.bind_wave_selection(ui);
+        self.bind_reaper(ui);
         let c = self.clone();
         ui.on_exit_requested(move || {
             if let Some(ui) = c.ui.upgrade() {

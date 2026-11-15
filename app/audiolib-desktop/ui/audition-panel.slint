@@ -876,7 +876,8 @@ component WaveSelectionOverlay inherits Rectangle {
     accessible-description: root.hint;
     if root.shown-active && root.shown-end > root.view-start && root.shown-start < root.view-end: Rectangle {
         x: max(0px, root.left-x); y: 0px; width: max(0px, min(root.width, root.right-x) - self.x); height: root.plot-height;
-        background: Theme.accent.with-alpha(0.24);
+        background: Theme.accent.with-alpha(0.38);
+        border-width: 1px; border-color: Theme.accent-hover.with-alpha(0.9);
         accessible-role: text; accessible-label: root.chinese ? "选中的波形区域" : "Selected waveform region";
     }
     if root.shown-active && root.shown-start >= root.view-start && root.shown-start <= root.view-end: Rectangle {
@@ -1242,7 +1243,7 @@ component ClassicAuditionPanel inherits Rectangle {
                     x: (root.view-start - root.shown-start) / root.shown-span * parent.width;
                     width: max(0px, (root.view-end - root.view-start) / root.shown-span * parent.width);
                 }
-                if !root.waveform-ready: Text { text: root.busy || root.missing || root.state == 1 || root.state == 7 ? root.unavailable : root.ready ? (root.spectral ? (root.chinese ? "正在分析频谱峰值…" : "Analyzing spectral peaks…") : (root.chinese ? "正在分析波形…" : "Analyzing waveform…")) : (root.play-on-single-click ? (root.chinese ? "单击声音即可试听" : "Click a sound to audition") : (root.chinese ? "选择声音查看波形 · 双击试听" : "Select a sound to view its waveform · Double-click to audition")); color: root.spectral ? #263238 : Theme.dim; horizontal-alignment: center; vertical-alignment: center; font-size: Theme.font(11); }
+                if !root.waveform-ready: Text { text: root.busy || root.missing || root.state == 1 || root.state == 7 ? root.unavailable : root.ready ? (root.spectral ? (root.chinese ? "正在分析频谱峰值…" : "Analyzing spectral peaks…") : (root.chinese ? "正在分析波形…" : "Analyzing waveform…")) : (root.play-on-single-click ? (root.chinese ? "单击声音即可试听" : "Click a sound to audition") : (root.chinese ? "选择声音查看波形 · 双击试听" : "Select a sound to view its waveform · Double-click to audition")); color: Theme.dim; horizontal-alignment: center; vertical-alignment: center; font-size: Theme.font(11); }
                 // These overlays are paint-only, leaving click/scroll ownership to scrub.
                 if root.ready && root.duration > 0: PlayedRegion {
                     x: 0px; y: 0px; width: parent.width; height: parent.height;
@@ -1759,7 +1760,7 @@ component WorkbenchAuditionPanel inherits Rectangle {
                     // Empty, loading, error, missing and maintenance states explain themselves.
                     if root.phase == 0 || root.phase == 1: VerticalLayout { alignment: center; spacing: 6px * Theme.ui-scale;
                         Text {
-                            horizontal-alignment: center; font-size: Theme.font(11); color: root.show-spectral && root.waveform-ready ? #263238 : Theme.dim;
+                            horizontal-alignment: center; font-size: Theme.font(11); color: Theme.dim;
                             text: root.phase == 1
                             ? (root.ready ? (root.chinese ? "正在分析频谱峰值…" : "Analyzing spectral peaks…") : (root.chinese ? "正在加载声音…" : "Loading sound…"))
                             : (root.play-on-single-click ? (root.chinese ? "单击声音即可试听" : "Click a sound to audition") : (root.chinese ? "选择声音查看波形 · 双击试听" : "Select a sound to view its waveform · Double-click to audition"));

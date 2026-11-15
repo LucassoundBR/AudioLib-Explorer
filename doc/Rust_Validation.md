@@ -1804,3 +1804,114 @@ CR 补充修复同步门禁吞掉键盘输入及方向键停在中间服务器�
 新增本地可写库及实际只读 SQLite 快照两项真实 Controller 回归，旧代码均失败于残留 Album 断言，修复后均通过。覆盖目录与 Album 双向交叉、关键词和收藏条件保留、失效任务绑定清除及旧 generation 的目录成功/错误发布拒绝。测试使用 owned 临时 WAV、SQLite 和 Slint 事件循环，未访问工作库或真实 HTTP 服务。
 
 Rust 1.97.1 MSVC：格式、桌面全部 targets 严格 Clippy、54 项搜索任务测试、3 项目录检索测试和 1 项收藏 UI 入口测试通过（隔离 child 由 parent 执行，不重复计数）。此次没有数据库格式、SQL 查询或服务端协议变更；未重新执行百万条基准或宣称新的网络/物理音频延迟结果。本地构建、便携校验及固定安装结果另记录于忽略目录 `.rust-validation/cross-index-fix/`。
+
+## 2026-11-14 REAPER send and waveform contrast candidate
+
+Added an explicit REAPER companion/file bridge, Send button and `S` shortcut in
+both layouts, opt-in session-only Auto-Focus, and darker waveform canvases with
+stronger selection fill/borders. The app never launches REAPER. Setup, supported
+media behavior and recorded native acceptance are described in
+[Rust REAPER integration](Rust_Reaper_Integration.md). Shared-desktop test policy
+and the persistent test profile are documented separately in
+[Shared desktop testing](Shared_Desktop_Testing.md).
+
+Rust 1.97.1 MSVC: final `cargo fmt --all -- --check` and strict Clippy for all
+`audiolib-desktop`/`audiolib-windows` targets passed. Targeted checks passed:
+
+- REAPER protocol, shortcut and real Controller/file-peer flow: 6 tests. The
+  isolated child verifies whole-file identity, the displayed-source region while
+  the inspector describes another file, exact durable WAV bytes, retained export
+  lifetime, unchanged originals and cancellation on close before final shutdown.
+- Windows handle parser: 1 test; no window API was activated.
+- Original slice exporter `slice::tests::`: 13 tests, including every stored
+  sample bit/channel, valid-bit precision, source changes and cancellation. An
+  initial `slice_tests::` filter selected zero tests and is not a passing check;
+  the corrected filter ran against the already-built audio test executable.
+- Waveform renderer: 9 tests; selection interaction: 17 tests. These results
+  remain applicable because their UI/rendering source did not change afterward.
+- Explicit offscreen visual export: 1 test; six PNGs cover normal/spectral and
+  setup views in Classic/Studio. Reviewed both normal views, Studio spectral and
+  the Classic setup dialog for contrast, selection boundaries and control layout.
+- Actual production Lua companion with an in-memory host/filesystem: 8 checks.
+  This covers syntax/runtime logic, claim/cancel races and import guards, without
+  asserting native REAPER API/filesystem behavior.
+- Shared-desktop harness policy: 7 cases; no native launches. PowerShell syntax
+  passed for both harness scripts. `git diff --check` passed.
+- WindowsClient ASIO release-license preflight: 480 packages / 837 notices passed.
+
+Diagnostics and PNGs are in ignored `.rust-validation/reaper-integration/`.
+Development checks use the default audio features because no audio/device
+backend or feature wiring changed. The candidate release selects ASIO with the
+pinned, verified SDK. DataProvider, database schema/query/metadata implementations,
+server behavior and dependency lockfile are unchanged; their recorded baselines
+remain applicable, so unrelated database/server/performance suites were omitted.
+
+Initial verification used file/CLI and offscreen checks. The user subsequently
+authorized an interactive window for current-script insertion and Auto-Focus;
+the native results are recorded below. Earlier proof-of-concept results were
+not substituted for current production acceptance. No publication or tag
+creation was requested.
+
+The Windows x64 ASIO release build passed, followed by package-license, file
+compatibility, privacy/publication-boundary and ZIP-entry checks (906 files).
+Candidate: `dist/latest/AudioLibExplorer-latest-win-x64-portable.zip`, tagged only
+in package metadata as `v1.0.0-beta.1`; no Git tag or publication was created.
+Both packaged EXEs match their build outputs and SHA256 sidecars. The validated
+application/source hashes remained unchanged through packaging.
+
+Version-only execution of both packaged EXEs passed with exit code 0 and expected
+`1.0.0` output, without initializing the isolated runtime-data directory. The
+first direct PowerShell invocation did not correctly await the GUI-subsystem
+executable; replacing it with bounded ProcessStartInfo execution and explicit
+stdout/stderr/exit capture resolved that harness failure. No native GUI startup
+or REAPER acceptance is inferred from these version-only checks.
+
+Budgeted cache maintenance passed: 33,393,960,958 logical bytes (about 31.1 GiB),
+under the 40 GiB limit; zero bytes removed. Release artifacts, SDKs, Cargo/Rustup,
+validation evidence and source/audio/data were retained. This final acceptance
+reused the unchanged Rust binaries/source hashes; it did not rebuild Rust or
+repeat cache pruning.
+
+### Authorized native and installation acceptance
+
+On 2026-11-14 the current packaged candidate was tested with REAPER 7.85 and the
+persistent owned test profile. Dummy Audio was selected through Preferences and
+verified there. The evaluation countdown and normal Still Evaluating button
+were handled through the authorized UI-control session. The test used a new
+owned project and synthetic media; the normal REAPER profile and original WAV
+SHA256 values remained unchanged. Playback stayed stopped throughout.
+
+The app-generated production companion ran as an independent ReaScript action.
+Whole-file sends through the button and `S` passed at the 2.5-second cursor,
+preserving exact 48 kHz/24-bit stereo file bytes. Auto-Focus off left AudioLib
+in front. Undo removed the insertion. A native waveform drag produced a
+12,011-frame/250.229-ms region; `S` sent the region with exact source samples,
+48 kHz/24-bit stereo, and restored the minimized REAPER window to foreground
+with Auto-Focus on. Missing-track and closed/missing-companion error handling
+were observed. Closed REAPER was not relaunched by AudioLib. Both owned apps
+closed normally and the profile lock was released. No physical-device playback,
+ASIO performance or Windows foreground-denial claim is inferred from this pass.
+
+A private inspection fixture initially combined track creation and insertion
+within one undo context and reused a deleted track pointer. The fixture was
+corrected and the shortcut/region/focus cases repeated with the production
+companion in a separate script context. This was a fixture failure. An initial
+sandboxed launch was also invisible to UI control; only the verified owned,
+uninitialized process was ended, and the same run/profile resumed on the
+interactive desktop. Diagnostics remain in ignored
+`.rust-validation/reaper-native/29aa509420ce433594d9952cb4ffb041/`.
+
+The native layout was existing `default-v2`, with Classic player's full-width
+waveform and controls above. The earlier Studio visual fixture showed an
+existing alternate layout; waveform/parameter positions were not redesigned.
+Only isolated test preferences selected the theme.
+
+`tools/validate-portable.ps1 -CleanCheckout` passed against the packaged payload:
+EXE identity/sidecars, isolated first launch and synthetic scan, CLI statistics,
+Chinese UI startup/exit, expected invalid-settings diagnostic, licenses and
+unchanged source. `tools/install-local-release.ps1` then installed 908
+package-owned files in `local_release/`, verified every SHA256 and passed the
+installed CLI version (`1.0.0`) and isolated desktop startup. The installation
+receipt is `.rust-validation/local-install/b9209b254e794b74ade8f21a7ec62297/report.json`.
+Normal runtime data/preferences were preserved. No Git commit, tag or remote
+publication was made.
