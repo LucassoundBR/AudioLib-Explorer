@@ -307,3 +307,77 @@ application delivery. A new release build/package, full portable acceptance,
 real button/S/Undo/Redo/focus acceptance with the production DLL, fixed local
 installation and final cache maintenance remain pending. The old package must
 not replace the daily installation. No release/tag/merge is requested.
+
+## Milestone 7: final package, native acceptance and local delivery
+
+Source commit `3e35c96` passed the Windows x64 ASIO release build in 27m05s.
+Preflight covered 480 packages/837 notices with the verified SDK 2.3.4. Packaging
+passed notices, v0.7.8 updater compatibility, publication/privacy boundaries and
+906 ZIP entries. Full portable acceptance passed once for this actual payload:
+EXE identity, isolated startup/scan, CLI statistics, Chinese UI startup/exit,
+invalid-settings diagnostics, notices and unchanged source.
+
+In the authorized interactive window, an isolated one-file library and new
+project used the persistent Dummy Audio profile with one selected track and
+cursor at 2.5 seconds. The enabled evaluation control was used normally. No Lua
+was loaded. The final packaged app, rather than the standalone proof, established:
+
+- S before DLL installation refused with native-extension setup instructions.
+  Connect REAPER exported the embedded DLL and displayed its one-time setup;
+  the main layout remained the existing full-width Classic Waveform/controls.
+- After installing that exported DLL in the test profile and restarting only
+  the owned host, the Send button inserted exactly one 1-second WAV at 2.5 s.
+  Auto-Focus off left AudioLib foreground. The imported copy has the exact
+  source SHA256, and the cursor remains at 2.5 s.
+- Menu Undo after saving removed only the sent item, keeping one track and
+  cursor 2.5 s. Redo restored it; the saved project contained one item again.
+- With an active Waveform region and Auto-Focus on, S inserted one additional
+  item and restored minimized REAPER to foreground, observed before manual
+  activation. The region is 12,611 frames/262.7291667 ms, PCM24/48 kHz/stereo.
+  A deterministic aperiodic source established exactly one matching source
+  segment starting at frame 8,605 (179.2708333 ms), ending at 442 ms, consistent
+  with the displayed 179–442 ms selection. Every PCM byte matches that segment;
+  the imported copy also matches the durable export SHA256.
+- Region Undo after saving retained the prior whole item. Its complete saved
+  ITEM chunk matches the pre-region snapshot; the track and cursor are intact.
+- Preferences-open S was refused. Closed-host S requested opening REAPER and
+  did not start it. The saved project remained unchanged and the export folder
+  retained exactly one durable slice after the rejected sends.
+
+The source was generated only in the owned fixture; no source library audio was
+edited. Audition volume was zero with an intentionally unavailable fixture
+device; the expected audition-device warning during region selection did not
+affect Send. Playback remained stopped in REAPER. Real multiple-host ambiguity,
+foreground denial, a native no-track UI case and physical-device latency were
+not exercised; relevant pure protocol/selection tests passed. No new search,
+database, server or driver-performance claim is inferred.
+
+Both owned applications closed normally and the profile lease was released.
+The accepted package updated fixed `local_release/`: all 908 package-owned files
+matched SHA256, six needed copying, CLI 1.0.0 and isolated installed desktop
+startup passed. The exported DLL was installed in the verified normal REAPER
+resource `UserPlugins` with the host closed, and its SHA256 verified. Normal
+REAPER INI remained unchanged; the normal host was not launched or reconfigured.
+Existing library/settings/runtime data were preserved. Subsequent normal use
+can open REAPER, select one track/cursor and use the existing button or S.
+
+Artifact SHA256:
+
+| Artifact | SHA256 |
+| --- | --- |
+| Desktop | `c9a7b2347e5be6861da13e10cca6ec95083e15c83d4c85c9b39079b0d1d5b097` |
+| CLI | `45cf19dec5c33210f59d2f4fb455369f0e07a6cf7e4877aaf0dcc15d9c1d06b1` |
+| Portable ZIP | `6fb43122e8a4a314f408061440ee4c8566c07eff207b87e55257b801a6b7e45d` |
+| Native DLL | `ea9984dd1364d1276b5287249192daf036db9e4c4df92f263f41c9f5d520943a` |
+
+Private evidence is in `.rust-validation/reaper-native-probe/`:
+`build-dll-final.log`, `portable-dll-final.log`, `dll-application-acceptance.json`,
+`dll-wave-acceptance.json`, `dll-normal-install.json` and `install-dll-final.log`.
+Owned project snapshots are under run `82007d5680644c0b8bff99c8e540cf7c`.
+The installation receipt is `.rust-validation/local-install/e9760dec02744b7495d945cb217dc409/report.json`.
+
+Final budgeted maintenance passed: 36,918,559,821 logical debug-cache bytes
+(34.38 GiB), below 40 GiB; zero bytes removed. Release outputs, SDKs, Cargo/Rustup,
+source/audio/data and private evidence were retained. No additional Rust checks
+or rebuild are required for recording these delivery results. No GitHub release,
+tag or merge was published; the development branch remains the delivery source.

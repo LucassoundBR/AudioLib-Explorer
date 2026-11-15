@@ -227,3 +227,20 @@ no-track refusal and balanced failure without Slint or a live host.
 
 This section describes the implementation; final package and button/S native
 acceptance results must be recorded separately before calling delivery complete.
+
+### Accepted native DLL delivery
+
+The packaged source `3e35c96` subsequently passed independent native acceptance
+and fixed local installation. Actual button/S, Undo/Redo after saving, region
+Undo preserving the previous item, cursor preservation and minimized-host
+Auto-Focus passed with Dummy Audio and no Lua. Missing DLL, open Preferences and
+closed REAPER were refused as expected. Exact region samples, PCM24/48-kHz/
+stereo and copied-file identity were verified. The full-width Classic layout
+was retained; normal preferences were not overwritten.
+
+The accepted payload is installed in `local_release/`, and its DLL is installed
+with verified SHA256 in the machine's normal REAPER resource `UserPlugins`.
+The normal host was closed during installation; its INI remained unchanged.
+Other installations still need the one-time DLL setup above. See [final
+acceptance and limits](REAPER_Native_Send_Plan.md#milestone-7-final-package-native-acceptance-and-local-delivery)
+for evidence and checks that were not exercised.

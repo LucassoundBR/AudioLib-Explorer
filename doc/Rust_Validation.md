@@ -2073,3 +2073,36 @@ Actual source and DLL protocol changed; their old acceptance cannot be reused.
 Database/server/audio backend behavior did not change and their relevant
 documented baselines remain applicable. Release build/package and independent
 native/installed acceptance are the next delivery steps.
+
+### Native DLL final application delivery
+
+Source `3e35c96` passed its selected checks above and a Windows x64 ASIO release
+build (27m05s). Packaging, dependency notices, updater compatibility, privacy/ZIP
+boundaries and one complete portable startup acceptance passed for the new
+payload. The earlier stock transport candidate was not installed.
+
+Actual final-app tests passed with the dedicated Dummy Audio profile and no Lua:
+missing-DLL refusal, Connect DLL export/setup, whole Send with focus off, native
+Undo/Redo after project save, region S with minimized-host Auto-Focus, exact
+PCM24/48-kHz/stereo region/source bytes, region Undo preserving the entire prior
+ITEM chunk, Preferences refusal and closed-host error without launch. One track
+and cursor 2.5 s were retained. The region contains 12,611 frames starting at
+unique source frame 8,605; this aperiodic fixture resolves the earlier periodic
+fixture's source-offset ambiguity. The source and normal REAPER INI hashes were
+unchanged. Both owned apps closed normally, releasing the test-profile lease.
+
+Fixed `local_release/` was updated from the accepted payload: 908 files verified,
+six copied, CLI 1.0.0 and isolated installed startup passed. The exported DLL was
+installed with identical hash in normal REAPER `UserPlugins`, with the host
+closed and INI unchanged. No normal-profile host launch or device change was
+performed. Working libraries, Metadata, preferences and runtime state remain
+separate from binaries. Receipt:
+`.rust-validation/local-install/e9760dec02744b7495d945cb217dc409/report.json`.
+
+Full details, artifact hashes, limits and private evidence are in [milestone 7](REAPER_Native_Send_Plan.md#milestone-7-final-package-native-acceptance-and-local-delivery).
+Physical audio/latency, foreground denial, real multiple-host and native no-track
+UI cases were not run; relevant pure tests are recorded separately. Stable
+database/server/device-backend checks remained excluded for unchanged behavior.
+Final 40-GiB cache maintenance passed with 36,918,559,821 logical bytes retained
+(34.38 GiB); zero removed. No Rust compilation/testing was repeated for this
+documentation-only result record. No release/tag/merge was published.
