@@ -17,6 +17,15 @@ pub(crate) fn restore_before_show(ui: &AppWindow, layout: &WindowLayoutPreferenc
     let window = ui.window();
     if let (Some(width), Some(height)) = (layout.width, layout.height) {
         window.set_size(slint::LogicalSize::new(width, height));
+    } else if layout.maximized {
+        // Mark the normal restore size explicit before maximizing. Without it,
+        // winit/Slint's first layout can request the preferred 1440x900 size
+        // after native maximization, leaving WS_MAXIMIZE set on a smaller HWND.
+        // Match the existing design's preferred size; keep saved axes if present.
+        window.set_size(slint::LogicalSize::new(
+            layout.width.unwrap_or(1440.0),
+            layout.height.unwrap_or(900.0),
+        ));
     }
     if let (Some(x), Some(y)) = (layout.x, layout.y) {
         window.set_position(slint::PhysicalPosition::new(x, y));
@@ -144,6 +153,26 @@ fn interface_scale(ui: &AppWindow) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn maximized_first_launch_has_explicit_normal_restore_size() {
+        i_slint_backend_testing::init_no_event_loop();
+        for (width, height) in [(None, None), (Some(1280.0), None), (None, Some(760.0))] {
+            let ui = AppWindow::new().unwrap();
+            let saved = WindowLayoutPreferences {
+                maximized: true,
+                width,
+                height,
+                ..Default::default()
+            };
+            restore_before_show(&ui, &saved);
+            let size = ui.window().size().to_logical(ui.window().scale_factor());
+            assert_eq!(
+                (size.width, size.height),
+                (width.unwrap_or(1440.0), height.unwrap_or(900.0))
+            );
+        }
+    }
 
     #[test]
     fn pane_layout_round_trips_through_the_window_at_any_interface_scale() {
