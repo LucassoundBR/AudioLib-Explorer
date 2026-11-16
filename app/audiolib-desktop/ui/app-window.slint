@@ -1598,6 +1598,10 @@ export component AppWindow inherits Window {
     in-out property <bool> audition-repeat: false;
     in-out property <bool> audition-reverse: false;
     in property <bool> confirmed-reverse: false;
+    in property <float> wave-source-duration: 0;
+    pure callback mirror-waveform(image) -> image;
+    property <image> displayed-waveform: root.confirmed-reverse ? root.mirror-waveform(root.waveform-image) : root.waveform-image;
+    property <image> displayed-mask: root.confirmed-reverse ? root.mirror-waveform(root.waveform-mask) : root.waveform-mask;
     in property <bool> reverse-supported: true;
     in-out property <bool> audition-play-on-single-click: false;
     callback single-click-play-requested(bool);
@@ -3717,7 +3721,7 @@ main-scroll := ScrollView {
             height: Theme.modern-player ? max(114px * Theme.ui-scale, root.audition-preferred-height) : (root.short-layout ? 210px : 238px) * Theme.ui-scale + self.selection-feedback-height;
             expanded: root.audition-expanded;
             narrow: root.content-width < 1440px * Theme.ui-scale;
-            waveform-mask: root.waveform-mask;
+            waveform-mask: root.displayed-mask;
             expanded-requested(value) => {
                 root.audition-expanded = value;
                 root.audition-preferred-height = (value ? 286px : 114px) * Theme.ui-scale;
@@ -3731,13 +3735,13 @@ main-scroll := ScrollView {
             output-backend: root.output-backend; output-rate: root.output-rate; output-xruns: root.output-xruns;
             target-start: root.wave-target-start; target-end: root.wave-target-end;
             relink-enabled: !root.closing && !root.library-busy && root.has-selection;
-            playing: root.playing; smooth-progress: root.playback-smooth; progress-clock: root.playback-clock; playback-rate: root.confirmed-playback-rate; waveform: root.waveform-image; waveform-ready: root.waveform-ready;
+            playing: root.playing; smooth-progress: root.playback-smooth; progress-clock: root.playback-clock; playback-rate: root.confirmed-playback-rate; waveform: root.displayed-waveform; waveform-ready: root.waveform-ready;
             name: root.playback-name; info: root.waveform-info; output: root.output-summary;
             position: root.play-position; duration: root.play-duration; time: root.play-time; end-time: root.play-end;
             view-start: root.view-start; view-end: root.view-end; zoom: root.wave-zoom; ruler-ticks: root.ruler-ticks;
             scroll <=> root.wave-scroll; volume-db <=> root.volume-db; volume-label: root.volume-label;
             pitch-text <=> root.pitch-text; rate-text <=> root.speed-text; mono <=> root.audition-mono; repeat <=> root.audition-repeat;
-            reverse <=> root.audition-reverse; reverse-supported: root.reverse-supported && !root.reaper-busy;
+            source-duration: root.wave-source-duration; display-reverse: root.confirmed-reverse; reverse <=> root.audition-reverse; reverse-supported: root.reverse-supported && !root.reaper-busy;
             play => { root.start-requested(); } pause => { root.pause-requested(); } stop => { root.stop-requested(); }
             seek(value) => { root.seek-requested(value); }
             seek-play(value) => { root.seek-play-requested(value); }
@@ -4592,7 +4596,7 @@ main-scroll := ScrollView {
             height: Theme.modern-player ? max(114px * Theme.ui-scale, root.audition-preferred-height) : (root.short-layout ? 176px : 204px) * Theme.ui-scale + self.selection-feedback-height;
             expanded: root.audition-expanded;
             narrow: root.content-width < 1440px * Theme.ui-scale;
-            waveform-mask: root.waveform-mask;
+            waveform-mask: root.displayed-mask;
             expanded-requested(value) => {
                 root.audition-expanded = value;
                 root.audition-preferred-height = (value ? 286px : 114px) * Theme.ui-scale;
@@ -4606,13 +4610,13 @@ main-scroll := ScrollView {
             output-backend: root.output-backend; output-rate: root.output-rate; output-xruns: root.output-xruns;
             target-start: root.wave-target-start; target-end: root.wave-target-end;
             relink-enabled: !root.closing && !root.library-busy && root.has-selection;
-            playing: root.playing; smooth-progress: root.playback-smooth; progress-clock: root.playback-clock; playback-rate: root.confirmed-playback-rate; waveform: root.waveform-image; waveform-ready: root.waveform-ready;
+            playing: root.playing; smooth-progress: root.playback-smooth; progress-clock: root.playback-clock; playback-rate: root.confirmed-playback-rate; waveform: root.displayed-waveform; waveform-ready: root.waveform-ready;
             name: root.playback-name; info: root.waveform-info; output: root.output-summary;
             position: root.play-position; duration: root.play-duration; time: root.play-time; end-time: root.play-end;
             view-start: root.view-start; view-end: root.view-end; zoom: root.wave-zoom; ruler-ticks: root.ruler-ticks;
             scroll <=> root.wave-scroll; volume-db <=> root.volume-db; volume-label: root.volume-label;
             pitch-text <=> root.pitch-text; rate-text <=> root.speed-text; mono <=> root.audition-mono; repeat <=> root.audition-repeat;
-            reverse <=> root.audition-reverse; reverse-supported: root.reverse-supported && !root.reaper-busy;
+            source-duration: root.wave-source-duration; display-reverse: root.confirmed-reverse; reverse <=> root.audition-reverse; reverse-supported: root.reverse-supported && !root.reaper-busy;
             play => { root.start-requested(); } pause => { root.pause-requested(); } stop => { root.stop-requested(); }
             seek(value) => { root.seek-requested(value); }
             seek-play(value) => { root.seek-play-requested(value); }

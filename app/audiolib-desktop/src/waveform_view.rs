@@ -2,6 +2,22 @@
 //! Waveform viewport and pixel rendering, independent of transport processing.
 use audiolib_audio::{SPECTRAL_PEAK_BASE, WaveformData, spectral_color};
 
+/// Mirror preview pixels by complete rows without changing source audio or caches.
+/// Bound to image/direction changes on the UI thread, never the playback clock.
+pub(crate) fn mirror_preview(image: slint::Image) -> slint::Image {
+    let Some(mut pixels) = image.to_rgba8() else {
+        return image;
+    };
+    let width = pixels.width() as usize;
+    if width == 0 {
+        return image;
+    }
+    for row in pixels.make_mut_slice().chunks_exact_mut(width) {
+        row.reverse();
+    }
+    slint::Image::from_rgba8(pixels)
+}
+
 // Slate still separates the intentionally black spectral noise peaks; ordinary
 // peaks use a near-black canvas for a stronger selection contrast.
 const SPECTRAL_BACKGROUND: [u8; 4] = [70, 80, 84, 255];

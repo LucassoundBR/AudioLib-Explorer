@@ -20,6 +20,7 @@ fn reaper_shortcut_respects_search_editing_busy_state_and_setup_modal() {
     i_slint_backend_testing::init_no_event_loop();
     for modern in [false, true] {
         let ui = AppWindow::new().unwrap();
+        ui.on_mirror_waveform(crate::waveform_view::mirror_preview);
         ui.global::<Theme>().set_modern_style(modern);
         ui.global::<Theme>().set_modern_player(modern);
         ui.window()
@@ -112,6 +113,7 @@ fn export_reaper_waveform_visual_previews() {
         (true, STUDIO_THEME, "studio"),
     ] {
         let ui = AppWindow::new().unwrap();
+        ui.on_mirror_waveform(crate::waveform_view::mirror_preview);
         crate::theme::apply_theme(&ui, theme);
         ui.global::<Theme>().set_modern_style(modern);
         ui.global::<Theme>().set_modern_player(modern);
@@ -157,7 +159,79 @@ fn export_reaper_waveform_visual_previews() {
             ui.set_waveform_image(slint::Image::from_rgba8(
                 slint::SharedPixelBuffer::clone_from_slice(&pixels, 1440, 160),
             ));
+            // Exact raster contract before scaling: every channel/row is retained,
+            // horizontal order reverses, and the original cache remains unchanged.
+            let original = ui.get_waveform_image();
+            let before = original.to_rgba8().unwrap().as_bytes().to_vec();
+            let flipped = crate::waveform_view::mirror_preview(original.clone())
+                .to_rgba8()
+                .unwrap();
+            let width = flipped.width() as usize;
+            for (index, pixel) in flipped.as_bytes().chunks_exact(4).enumerate() {
+                let source = (index / width * width + width - 1 - index % width) * 4;
+                assert_eq!(pixel, &before[source..source + 4]);
+            }
+            assert_eq!(original.to_rgba8().unwrap().as_bytes(), before);
+            assert_eq!(
+                crate::waveform_view::mirror_preview(slint::Image::from_rgba8(flipped))
+                    .to_rgba8()
+                    .unwrap()
+                    .as_bytes(),
+                before
+            );
             let pixels = ui.window().take_snapshot().unwrap();
+            let plot = ElementHandle::find_by_accessible_label(&ui, "Waveform timeline")
+                .next()
+                .unwrap();
+            let origin = plot.absolute_position();
+            let size = plot.size();
+            ui.set_play_position(20.0);
+            ui.set_audition_reverse(true);
+            ui.set_confirmed_reverse(true);
+            i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(1));
+            let mirrored = ui.window().take_snapshot().unwrap();
+            for (suffix, buffer) in [("before", &pixels), ("after", &mirrored)] {
+                image::save_buffer(
+                    directory.join(format!("{name}-{spectral}-debug-{suffix}.png")),
+                    buffer.as_bytes(),
+                    buffer.width(),
+                    buffer.height(),
+                    image::ColorType::Rgba8,
+                )
+                .unwrap();
+            }
+            // Compare asymmetric real raster samples, including the mirrored selection.
+            for fraction in [0.13_f32, 0.31, 0.69, 0.87] {
+                // Channel centre avoids coverage changes at resampled peak edges.
+                let y = (origin.y + size.height * 0.25) as usize;
+                let left = (origin.x + size.width * fraction) as usize;
+                let right = (origin.x + size.width * (1.0 - fraction)) as usize;
+                let a = (y * pixels.width() as usize + left) * 4;
+                let b = (y * mirrored.width() as usize + right) * 4;
+                for channel in 0..3 {
+                    assert!(
+                        pixels.as_bytes()[a + channel].abs_diff(mirrored.as_bytes()[b + channel])
+                            < 16,
+                        "Mirror mismatch {name}, spectral={spectral}, fraction={fraction}, a={:?} b={:?}",
+                        &pixels.as_bytes()[a..a + 4],
+                        &mirrored.as_bytes()[b..b + 4]
+                    );
+                }
+            }
+            image::save_buffer(
+                directory.join(format!(
+                    "{name}-reverse-{}.png",
+                    if spectral { "spectral" } else { "normal" }
+                )),
+                mirrored.as_bytes(),
+                mirrored.width(),
+                mirrored.height(),
+                image::ColorType::Rgba8,
+            )
+            .unwrap();
+            ui.set_confirmed_reverse(false);
+            ui.set_audition_reverse(false);
+            ui.set_play_position(0.0);
             image::save_buffer(
                 directory.join(format!(
                     "{name}-{}.png",

@@ -935,7 +935,59 @@ fn predicted_playhead_does_not_advance_past_selection_end() {
 }
 
 #[test]
-fn reverse_playhead_moves_backwards_and_stops_at_the_original_selection_start() {
+fn mirrored_reverse_maps_selection_seek_zoom_and_pending_view_to_original_frames() {
+    i_slint_backend_testing::init_no_event_loop();
+    for modern in [false, true] {
+        let ui = window(modern);
+        ui.set_wave_source_duration(30.0);
+        ui.set_play_duration(5.0);
+        ui.set_audition_reverse(true);
+        ui.set_confirmed_reverse(true);
+        settle();
+        let ranges = accept_ranges(&ui);
+        select(&ui, 0.2, 0.6);
+        near(ranges.borrow()[0], (8.0, 16.0));
+        select(&ui, 0.2, 0.1);
+        near(*ranges.borrow().last().unwrap(), (8.0, 18.0));
+        ui.set_wave_selection_active(false);
+        settle();
+        let seeks = Rc::new(RefCell::new(Vec::new()));
+        let observed = seeks.clone();
+        ui.on_seek_play_requested(move |t| observed.borrow_mut().push(t));
+        pressed(&ui, 0.1);
+        released(&ui, 0.1);
+        assert!((seeks.borrow()[0] - 18.0).abs() < 0.025);
+        let zooms = Rc::new(RefCell::new(Vec::new()));
+        let observed = zooms.clone();
+        ui.on_waveform_wheel_zoom_requested(move |_, f| observed.borrow_mut().push(f));
+        ui.window().dispatch_event(WindowEvent::PointerScrolled {
+            position: point(&ui, 0.2),
+            delta_x: 0.0,
+            delta_y: 120.0,
+        });
+        assert!((zooms.borrow()[0] - 0.8).abs() < 0.001);
+        // The old raster is still 0..20; the visible requested view is 4..12.
+        ui.set_wave_target_start(4.0);
+        ui.set_wave_target_end(12.0);
+        settle();
+        select(&ui, 0.25, 0.75);
+        near(*ranges.borrow().last().unwrap(), (6.0, 10.0));
+        // Only an acknowledged direction changes the coordinate system.
+        ui.set_confirmed_reverse(false);
+        ui.set_play_duration(30.0);
+        ui.set_wave_target_start(0.0);
+        ui.set_wave_target_end(0.0);
+        ui.set_wave_selection_active(false);
+        settle();
+        pressed(&ui, 0.1);
+        released(&ui, 0.1);
+        assert!((seeks.borrow().last().unwrap() - 2.0).abs() < 0.025);
+        ui.hide().unwrap();
+    }
+}
+
+#[test]
+fn reverse_playhead_moves_forward_and_stops_at_the_mirrored_selection_end() {
     i_slint_backend_testing::init_no_event_loop();
     for modern in [false, true] {
         let ui = window(modern);
@@ -943,6 +995,7 @@ fn reverse_playhead_moves_backwards_and_stops_at_the_original_selection_start() 
         ui.set_wave_selection_end(8.0);
         ui.set_wave_selection_active(true);
         ui.set_audition_reverse(true);
+        ui.set_confirmed_reverse(true);
         ui.set_play_position(4.1);
         ui.set_confirmed_playback_rate(-4.0);
         ui.set_playback_smooth(true);
@@ -958,13 +1011,13 @@ fn reverse_playhead_moves_backwards_and_stops_at_the_original_selection_start() 
                 .unwrap();
             played.size().width / wave.size().width
         };
-        assert!((fraction() - 0.205).abs() < 0.0001);
+        assert!((fraction() - 0.795).abs() < 0.0001);
         i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(16));
-        assert!((fraction() - 0.2018).abs() < 0.0001);
+        assert!((fraction() - 0.7982).abs() < 0.0001);
         i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(16));
-        assert!((fraction() - 0.2).abs() < 0.0001);
+        assert!((fraction() - 0.8).abs() < 0.0001);
         i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
-        assert!((fraction() - 0.2).abs() < 0.0001);
+        assert!((fraction() - 0.8).abs() < 0.0001);
         ui.hide().unwrap();
     }
 }

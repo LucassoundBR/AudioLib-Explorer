@@ -1236,6 +1236,7 @@ impl Controller {
     }
 
     fn bind(self: &Arc<Self>, ui: &AppWindow) {
+        ui.on_mirror_waveform(crate::waveform_view::mirror_preview);
         self.bind_search_tasks(ui);
         self.bind_ai_search(ui);
         self.bind_artwork(ui);

@@ -1178,7 +1178,7 @@ component ClassicAuditionPanel inherits Rectangle {
         root.selection-active && root.selection-end > root.selection-start && root.position >= root.selection-start && root.position <= root.selection-end ? root.selection-start : 0,
         root.selection-active && root.selection-end > root.selection-start && root.position >= root.selection-start && root.position <= root.selection-end ? min(root.duration, root.selection-end) : root.duration);
     function sync-progress(allow-correction: bool) {
-        let at-start = root.reverse ? root.position >= root.duration : root.position <= 0;
+        let at-start = root.position <= 0;
         if root.at-start != at-start { root.at-start = at-start; }
         let previous = root.visual-position;
         let continuous = allow-correction && root.ready && root.playing && root.smooth-progress && abs(previous - root.position) < 0.1 * abs(root.playback-rate);
@@ -1221,7 +1221,7 @@ component ClassicAuditionPanel inherits Rectangle {
                         label: root.chinese ? "回到开头" : "Go to start"; tip-align: -1;
                         enabled: root.transport-ready && !root.at-start;
                         hint: !root.transport-ready ? root.unavailable : (root.at-start ? (root.chinese ? "已在开头" : "Already at the beginning") : (root.chinese ? "回到声音开头" : "Return to the beginning"));
-                        clicked => { root.seek(root.reverse ? root.duration : 0); }
+                        clicked => { root.seek(0); }
                     }
                     ClassicTool {
                         height: 28px * Theme.ui-scale; icon: @image-url("icons/play.svg");
@@ -1367,7 +1367,7 @@ component ClassicAuditionPanel inherits Rectangle {
                         root.seek(clamp(root.visual-position + (event.text == Key.LeftArrow ? -nudge : nudge), 0, root.duration));
                         return accept;
                     }
-                    if event.text == Key.Home { root.seek(root.reverse ? root.duration : 0); return accept; }
+                    if event.text == Key.Home { root.seek(0); return accept; }
                     if event.text == "+" || event.text == "=" { root.zoom-change(2); return accept; }
                     if event.text == "-" && root.zoom > 1 { root.zoom-change(0.5); return accept; }
                     if event.text == "0" { root.zoom-change(0); return accept; }
@@ -1637,7 +1637,7 @@ component WorkbenchAuditionPanel inherits Rectangle {
                     hint: root.ready ? (root.chinese ? "空格" : "Space") : root.unavailable;
                     clicked => { root.toggle(); }
                 }
-                Tool { width: 32px * Theme.ui-scale; height: 32px * Theme.ui-scale; y: (parent.height - self.height) / 2; subtle: true; icon: @image-url("icons/start.svg"); label: root.chinese ? "回到开头" : "Go to start"; hint: root.transport-hint; enabled: root.ready; clicked => { root.seek(root.reverse ? root.duration : 0); } }
+                Tool { width: 32px * Theme.ui-scale; height: 32px * Theme.ui-scale; y: (parent.height - self.height) / 2; subtle: true; icon: @image-url("icons/start.svg"); label: root.chinese ? "回到开头" : "Go to start"; hint: root.transport-hint; enabled: root.ready; clicked => { root.seek(0); } }
                 Tool { width: 32px * Theme.ui-scale; height: 32px * Theme.ui-scale; y: (parent.height - self.height) / 2; subtle: true; icon: @image-url("icons/stop.svg"); label: root.chinese ? "停止" : "Stop"; hint: root.transport-hint; enabled: root.ready; clicked => { root.stop(); } }
                 Tool { width: 32px * Theme.ui-scale; height: 32px * Theme.ui-scale; y: (parent.height - self.height) / 2; subtle: true; icon: @image-url("icons/repeat.svg"); label: root.chinese ? "循环整个声音" : "Repeat sound"; hint: root.repeat ? (root.chinese ? "已开启" : "On") : ""; active: root.repeat; clicked => { root.repeat = !root.repeat; root.transform(root.pitch-text, root.rate-text, root.mono, root.repeat); } }
             }
@@ -1680,7 +1680,7 @@ component WorkbenchAuditionPanel inherits Rectangle {
                 Text {
                     x: 0px; width: parent.width; height: parent.height; horizontal-alignment: left;
                     accessible-role: text; accessible-label: root.chinese ? "试听时间" : "Audition time";
-                    text: (root.show-remaining ? "−" + Clock.format(max(0, root.reverse ? root.position : root.duration - root.position)) : root.time) + "  /  " + root.end-time;
+                    text: (root.show-remaining ? "−" + Clock.format(max(0, root.duration - root.position)) : root.time) + "  /  " + root.end-time;
                     color: time-touch.has-hover ? Theme.accent-hover : Theme.ink; font-family: "Consolas"; font-size: Theme.font(14); vertical-alignment: center;
                     animate color { duration: Theme.motion-fast; }
                 }
@@ -1887,7 +1887,7 @@ component WorkbenchAuditionPanel inherits Rectangle {
                             root.seek(clamp(root.visual-position + (event.text == Key.LeftArrow ? -nudge : nudge), 0, root.duration));
                             return accept;
                         }
-                        if event.text == Key.Home { root.seek(root.reverse ? root.duration : 0); return accept; }
+                        if event.text == Key.Home { root.seek(0); return accept; }
                         if event.text == "+" || event.text == "=" { root.zoom-change(2); return accept; }
                         if event.text == "-" && root.zoom > 1 { root.zoom-change(0.5); return accept; }
                         if event.text == "0" { root.zoom-change(0); return accept; }
@@ -2085,6 +2085,15 @@ export component AuditionPanel inherits Rectangle {
     in-out property <bool> repeat: false;
     in-out property <bool> reverse: false;
     in property <bool> reverse-supported: true;
+    // Engine, renderer and exports keep original source coordinates.
+    in property <bool> display-reverse: false;
+    in property <float> source-duration: 0;
+    property <float> display-duration: root.source-duration > 0 ? root.source-duration : root.duration;
+    property <float> presenter-scroll: root.display-reverse ? 1 - root.scroll : root.scroll;
+    changed scroll => { root.presenter-scroll = root.display-reverse ? 1 - root.scroll : root.scroll; }
+    changed display-reverse => { root.presenter-scroll = root.display-reverse ? 1 - root.scroll : root.scroll; }
+    pure function display-time(t: float) -> float { return root.display-reverse ? root.display-duration - t : t; }
+    function display-pan(v: float) { root.scroll = root.display-reverse ? 1 - v : v; root.pan(root.scroll); }
     callback play(); callback pause(); callback stop(); callback seek(float); callback seek-play(float);
     callback transform(string,string,bool,bool); callback volume(float);
     callback resize(int,int); callback zoom-change(float); callback zoom-at(float,float); callback pan(float);
@@ -2122,8 +2131,8 @@ export component AuditionPanel inherits Rectangle {
         compact: root.compact;
         spectral: root.spectral;
         chinese: root.chinese;
-        selection-active: root.selection-active; selection-start: root.selection-start; selection-end: root.selection-end;
-        selection-identity: root.selection-identity; selection-preparing: root.selection-preparing; selection-progress: root.selection-progress;
+        selection-active: root.selection-active; selection-start: root.display-reverse ? root.display-time(root.selection-end) : root.selection-start; selection-end: root.display-reverse ? root.display-time(root.selection-start) : root.selection-end;
+        selection-identity: root.selection-identity + (root.display-reverse ? ":reverse-view" : ":forward-view"); selection-preparing: root.selection-preparing; selection-progress: root.selection-progress;
         selection-export-state: root.selection-export-state; selection-native-cursor: root.selection-native-cursor;
         selection-shift-held: root.selection-shift-held; selection-cancel-revision: root.selection-cancel-revision;
         changed selection-gesture => { root.presenter-selection-gesture = self.selection-gesture; }
@@ -2138,7 +2147,7 @@ export component AuditionPanel inherits Rectangle {
             root.presenter-pointer-scale = self.selection-pointer-scale;
             root.selection-pointer-feedback-changed();
         }
-        selection-committed(start, end) => { root.selection-committed(start, end); }
+        selection-committed(start, end) => { root.selection-committed(root.display-reverse ? root.display-time(end) : start, root.display-reverse ? root.display-time(start) : end); }
         selection-cleared => { root.selection-cleared(); }
         selection-drag-requested => { root.selection-drag-requested(); }
         selection-drag-ended => { root.selection-drag-ended(); }
@@ -2151,22 +2160,22 @@ export component AuditionPanel inherits Rectangle {
         playing: root.playing;
         smooth-progress: root.smooth-progress;
         progress-clock: root.progress-clock;
-        playback-rate: root.playback-rate;
+        playback-rate: root.display-reverse ? -root.playback-rate : root.playback-rate;
         waveform: root.waveform;
         waveform-ready: root.waveform-ready;
         name: root.name;
         info: root.info;
         output: root.output;
-        position: root.position;
-        duration: root.duration;
-        time: root.time;
-        end-time: root.end-time;
-        view-start: root.view-start;
-        view-end: root.view-end;
-        target-start: root.target-start; target-end: root.target-end;
+        position: root.display-time(root.position);
+        duration: root.display-reverse ? root.display-duration : root.duration;
+        time: root.display-reverse ? Clock.format(root.display-time(root.position)) : root.time;
+        end-time: root.display-reverse ? Clock.format(root.display-duration) : root.end-time;
+        view-start: root.display-reverse ? root.display-time(root.view-end) : root.view-start;
+        view-end: root.display-reverse ? root.display-time(root.view-start) : root.view-end;
+        target-start: root.display-reverse ? root.display-time(root.target-end) : root.target-start; target-end: root.display-reverse ? root.display-time(root.target-start) : root.target-end;
         zoom: root.zoom;
         volume-label: root.volume-label;
-        scroll <=> root.scroll;
+        scroll <=> root.presenter-scroll;
         volume-db <=> root.volume-db;
         pitch-text <=> root.pitch-text;
         rate-text <=> root.rate-text;
@@ -2177,14 +2186,14 @@ export component AuditionPanel inherits Rectangle {
         play => { root.play(); }
         pause => { root.pause(); }
         stop => { root.stop(); }
-        seek(value) => { root.seek(value); }
-        seek-play(value) => { root.seek-play(value); }
+        seek(value) => { root.seek(root.display-time(value)); }
+        seek-play(value) => { root.seek-play(root.display-time(value)); }
         transform(pitch, rate, mono, repeat) => { root.transform(pitch, rate, mono, repeat); }
         volume(value) => { root.volume(value); }
         resize(width, height) => { root.resize(width, height); }
         zoom-change(value) => { root.zoom-change(value); }
-        zoom-at(factor, fraction) => { root.zoom-at(factor, fraction); }
-        pan(value) => { root.pan(value); }
+        zoom-at(factor, fraction) => { root.zoom-at(factor, root.display-reverse ? 1 - fraction : fraction); }
+        pan(value) => { root.display-pan(value); }
         peaks => { root.peaks(); }
         output-settings => { root.output-settings(); }
     }
@@ -2196,8 +2205,8 @@ export component AuditionPanel inherits Rectangle {
         compact: root.compact;
         spectral: root.spectral;
         chinese: root.chinese;
-        selection-active: root.selection-active; selection-start: root.selection-start; selection-end: root.selection-end;
-        selection-identity: root.selection-identity; selection-preparing: root.selection-preparing; selection-progress: root.selection-progress;
+        selection-active: root.selection-active; selection-start: root.display-reverse ? root.display-time(root.selection-end) : root.selection-start; selection-end: root.display-reverse ? root.display-time(root.selection-start) : root.selection-end;
+        selection-identity: root.selection-identity + (root.display-reverse ? ":reverse-view" : ":forward-view"); selection-preparing: root.selection-preparing; selection-progress: root.selection-progress;
         selection-export-state: root.selection-export-state; selection-native-cursor: root.selection-native-cursor;
         selection-shift-held: root.selection-shift-held; selection-cancel-revision: root.selection-cancel-revision;
         changed selection-gesture => { root.presenter-selection-gesture = self.selection-gesture; }
@@ -2212,7 +2221,7 @@ export component AuditionPanel inherits Rectangle {
             root.presenter-pointer-scale = self.selection-pointer-scale;
             root.selection-pointer-feedback-changed();
         }
-        selection-committed(start, end) => { root.selection-committed(start, end); }
+        selection-committed(start, end) => { root.selection-committed(root.display-reverse ? root.display-time(end) : start, root.display-reverse ? root.display-time(start) : end); }
         selection-cleared => { root.selection-cleared(); }
         selection-drag-requested => { root.selection-drag-requested(); }
         selection-drag-ended => { root.selection-drag-ended(); }
@@ -2223,18 +2232,18 @@ export component AuditionPanel inherits Rectangle {
         playing: root.playing;
         smooth-progress: root.smooth-progress;
         progress-clock: root.progress-clock;
-        playback-rate: root.playback-rate;
+        playback-rate: root.display-reverse ? -root.playback-rate : root.playback-rate;
         waveform: root.waveform;
         waveform-ready: root.waveform-ready;
         name: root.name;
         info: root.info;
         output: root.output;
-        position: root.position;
-        duration: root.duration;
-        time: root.time;
-        end-time: root.end-time;
-        view-start: root.view-start;
-        view-end: root.view-end;
+        position: root.display-time(root.position);
+        duration: root.display-reverse ? root.display-duration : root.duration;
+        time: root.display-reverse ? Clock.format(root.display-time(root.position)) : root.time;
+        end-time: root.display-reverse ? Clock.format(root.display-duration) : root.end-time;
+        view-start: root.display-reverse ? root.display-time(root.view-end) : root.view-start;
+        view-end: root.display-reverse ? root.display-time(root.view-start) : root.view-end;
         zoom: root.zoom;
         volume-label: root.volume-label;
         missing: root.missing;
@@ -2246,11 +2255,11 @@ export component AuditionPanel inherits Rectangle {
         output-backend: root.output-backend;
         output-rate: root.output-rate;
         output-xruns: root.output-xruns;
-        target-start: root.target-start;
-        target-end: root.target-end;
+        target-start: root.display-reverse ? root.display-time(root.target-end) : root.target-start;
+        target-end: root.display-reverse ? root.display-time(root.target-start) : root.target-end;
         ruler-ticks: root.ruler-ticks;
         relink-enabled: root.relink-enabled;
-        scroll <=> root.scroll;
+        scroll <=> root.presenter-scroll;
         volume-db <=> root.volume-db;
         pitch-text <=> root.pitch-text;
         rate-text <=> root.rate-text;
@@ -2264,14 +2273,14 @@ export component AuditionPanel inherits Rectangle {
         play => { root.play(); }
         pause => { root.pause(); }
         stop => { root.stop(); }
-        seek(value) => { root.seek(value); }
-        seek-play(value) => { root.seek-play(value); }
+        seek(value) => { root.seek(root.display-time(value)); }
+        seek-play(value) => { root.seek-play(root.display-time(value)); }
         transform(pitch, rate, mono, repeat) => { root.transform(pitch, rate, mono, repeat); }
         volume(value) => { root.volume(value); }
         resize(width, height) => { root.resize(width, height); }
         zoom-change(value) => { root.zoom-change(value); }
-        zoom-at(factor, fraction) => { root.zoom-at(factor, fraction); }
-        pan(value) => { root.pan(value); }
+        zoom-at(factor, fraction) => { root.zoom-at(factor, root.display-reverse ? 1 - fraction : fraction); }
+        pan(value) => { root.display-pan(value); }
         peaks => { root.peaks(); }
         output-settings => { root.output-settings(); }
         retry => { root.retry(); }

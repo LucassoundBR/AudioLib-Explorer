@@ -1,5 +1,59 @@
 # Night UI implementation checkpoints
 
+## Mirrored Reverse presentation checkpoint — 2026-11-16
+
+Stage4 preserves original engine/renderer-cache/export coordinates. AuditionPanel
+maps acknowledged Reverse to display time D-source_time, maps selection endpoints
+in opposite order, inverts zoom anchors/pan and maps seeks back to original time.
+Pending target ranges are mapped in both presenters. The mapped scroll value
+has an explicit synchronization path after user pan and controller updates.
+The preview clock/rate and Home/start use increasing display coordinates.
+
+D is the displayed WaveSource metadata duration, published/cleared with its
+identity, with the existing transport duration as the no-source fallback. This
+keeps reverse selection independent of an unrelated/shorter loaded transport.
+Direction is confirmed before mapping changes; the presenter gesture identity
+includes direction so an external direction change retires in-flight gestures.
+The selected original interval and prepared reverse-export pipeline remain owned
+by the existing Controller. No source WAV, library format or DSP change.
+
+Slint1.17.1 software ItemRenderer::scale is a no-op; an initial transform-based
+prototype compiled but failed pixel acceptance. Replaced it with a pure image
+callback bound to image/direction changes only. mirror_preview reverses complete
+RGBA rows using copy-on-write, preserving channels, alpha and the original image.
+It never runs in the audio callback or binds to playback position. Normal and
+spectral images/masks share this path; no graphics-backend migration/dependency.
+
+Validation PASS: formatting and strict desktop all-target ASIO Clippy in
+stage4-raster-final.log;19 selection/seek/resize/playhead/pending-view tests,
+the isolated original/region/reversed Send/close test and the S/search/modal
+guard passed in that run. Final explicit software-renderer acceptance PASS in
+stage4-visual-final.log: exact raw pixel order, original-cache preservation,
+double reversal, and mirrored selection/color samples in Classic/Studio normal
+and spectral views. Resampled samples use channel centres, not antialiased peak
+edges. These22 checks combine the21 unchanged passing interactions and the final
+visual exporter; earlier toolbar/wheel/pending-image checks retain their scopes
+for unchanged paths. No full workspace or unrelated data-safety suite repeated.
+
+Failed receipts remain private: stage4.log (seek test needed a layout settlement),
+stage4-fixed.log (found unmapped Studio pending target), stage4-final/visual.log
+(software scale limitation), initial raster run (callback purity declaration),
+stage4-raster-final.log (edge sample crossed a resampling boundary). Exact raw
+pixel assertions were added instead of weakening the mirror contract. Final
+renders inspected under .rust-validation/night-ui/stage4-snapshots/.
+
+This is a validated source checkpoint; installed binaries remain unchanged.
+Native UI/listening/host focus, final release/package/runtime and installation
+acceptance remain for the combined delivery. Existing audio/export/REAPER native
+baselines remain applicable to their unchanged implementation; no new native
+host result or acoustic/performance claim. Next: reconcile upstream v1.0.2 last,
+preserving the accepted UI/Reverse and native REAPER extension, then deliver the
+combined payload. Recommended model: Sol6.1 High for the integration review.
+
+Final Incremental cache maintenance PASS:20,992,021,043 logical bytes retained
+(about19.55GiB), zero removed,40GiB budget met. Dependencies, release/installation,
+SDKs, working data/audio and evidence preserved. Receipt: stage4-cache.log.
+
 ## Numeric units and ruler removal checkpoint — 2026-11-16
 
 Stage3 adds an audition-local UnitNumberInput: the editable TextInput holds only

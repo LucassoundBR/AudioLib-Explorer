@@ -605,6 +605,7 @@ impl Controller {
         self.slice_render_jobs.clear_pending();
         self.wave_selection_gesture.store(false, Ordering::Release);
         selection_ui_clear(ui);
+        ui.set_wave_source_duration(source.file.duration as f32);
         ui.set_wave_selection_identity(source.key.clone().into());
         self.command(AudioCommand::ClearRange);
         true
@@ -628,6 +629,7 @@ impl Controller {
         self.wave_selection_gesture.store(false, Ordering::Release);
         post(self.ui.clone(), |ui| {
             selection_ui_clear(&ui);
+            ui.set_wave_source_duration(0.0);
             ui.set_wave_selection_identity("".into());
         });
     }
