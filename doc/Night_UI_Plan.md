@@ -82,13 +82,26 @@ Send waits for the acknowledged direction and newly prepared WAV. REAPER DLL,
 native transport, Undo/Redo and focus protocol are unchanged from the accepted
 3e35c96/ab6d89c baseline; that baseline is not a fresh host test.
 
-Current integration checks are pending. Initial consumer Clippy found one
-redundant String conversion in progress reporting; corrected and resumed in
-.rust-validation/night-ui/reverse-integration-fixed.log. An additional compressed
-decoder comparison covers backwards MP3/Ogg/FLAC block boundaries. Final source
-checks, rendered/native UI acceptance, release payload acceptance and installation
-must pass before claiming delivery of Reverse; local_release still contains
-the accepted8842947 UI build.
+Integration checkpoint PASS: formatting; strict all-target ASIO Clippy for
+audio, IPC, CLI and desktop;18 export tests;5 Reverse tests including the added
+MP3/Ogg/FLAC block-boundary comparison;1 IPC contract test;27 selected desktop
+tests (5 toolbar,18 selection UI,1 S guard,1 prediction,1 isolated Send and1
+explicit visual export). The isolated Send peer verified exact original and
+reversed whole/range bytes, stale-direction refusal, retained interval/preview
+identity, durable export retention and close cancellation. No native host or
+audio device was used by these tests. Classic normal/spectral1920px renders
+were inspected: controls fit together, bottom Waveform and vertical gain remain.
+
+Initial consumer Clippy found one redundant String conversion in progress
+reporting; corrected and resumed successfully. Evidence:
+.rust-validation/night-ui/reverse-integration-fixed.log and reverse-ui-snapshots/.
+The prior31 audition/range/transport/seek regressions remain applicable because
+their decoder/transport implementation did not change after those passing
+checks; only an additional test and whole-file export API were added. Database,
+server, library writes, shutdown ordering, device backend and dependencies are
+unchanged; unrelated subsystem suites were excluded. Native UI/runtime,
+accepted release payload and installation are still pending; local_release
+continues to contain the accepted8842947 UI build.
 
 Authorized scope: fix first maximized startup on 4K, merge REAPER controls into
 the player toolbar, remove the lower zoom strip, add Pitch/Rate sliders and a

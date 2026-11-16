@@ -1109,6 +1109,8 @@ component ClassicAuditionPanel inherits Rectangle {
     changed rate-text => { if root.rate-text.is-float() { rate-slider.value = root.rate-text.to-float(); } }
     in-out property <bool> mono: false;
     in-out property <bool> repeat: false;
+    in-out property <bool> reverse: false;
+    in property <bool> reverse-supported: true;
     callback play(); callback pause(); callback stop(); callback seek(float); callback seek-play(float);
     callback transform(string,string,bool,bool); callback volume(float);
     callback resize(int,int); callback zoom-change(float); callback zoom-at(float,float); callback pan(float);
@@ -1160,13 +1162,14 @@ component ClassicAuditionPanel inherits Rectangle {
     // together with the clock this can repaint a whole strip of the player.
     property <bool> at-start: true;
     property <duration> progress-elapsed: root.ready && root.playing && root.smooth-progress ? clamp(animation-tick() - root.anchor-tick, 0ms, 100ms) : 0ms;
-    property <float> visual-position: clamp(root.anchor-position + root.progress-elapsed / 1s * root.playback-rate + root.correction * (1 - root.progress-elapsed / 100ms), 0,
+    property <float> visual-position: clamp(root.anchor-position + root.progress-elapsed / 1s * root.playback-rate + root.correction * (1 - root.progress-elapsed / 100ms),
+        root.selection-active && root.selection-end > root.selection-start && root.position >= root.selection-start && root.position <= root.selection-end ? root.selection-start : 0,
         root.selection-active && root.selection-end > root.selection-start && root.position >= root.selection-start && root.position <= root.selection-end ? min(root.duration, root.selection-end) : root.duration);
     function sync-progress(allow-correction: bool) {
-        let at-start = root.position <= 0;
+        let at-start = root.reverse ? root.position >= root.duration : root.position <= 0;
         if root.at-start != at-start { root.at-start = at-start; }
         let previous = root.visual-position;
-        let continuous = allow-correction && root.ready && root.playing && root.smooth-progress && abs(previous - root.position) < 0.1 * root.playback-rate;
+        let continuous = allow-correction && root.ready && root.playing && root.smooth-progress && abs(previous - root.position) < 0.1 * abs(root.playback-rate);
         root.anchor-position = root.position;
         root.anchor-tick = animation-tick();
         root.correction = continuous ? previous - root.position : 0;
@@ -1176,6 +1179,7 @@ component ClassicAuditionPanel inherits Rectangle {
     changed playing => { root.sync-progress(false); }
     changed smooth-progress => { root.sync-progress(false); }
     changed playback-rate => { root.sync-progress(false); }
+    changed reverse => { root.sync-progress(false); }
     // A clock identity survives deferred coalescing of smooth false -> true.
     changed progress-clock => { root.sync-progress(false); }
     property <bool> can-pan: root.transport-ready && root.zoom > 1 && !root.selection-gesture;
@@ -1205,7 +1209,7 @@ component ClassicAuditionPanel inherits Rectangle {
                         label: root.chinese ? "回到开头" : "Go to start"; tip-align: -1;
                         enabled: root.transport-ready && !root.at-start;
                         hint: !root.transport-ready ? root.unavailable : (root.at-start ? (root.chinese ? "已在开头" : "Already at the beginning") : (root.chinese ? "回到声音开头" : "Return to the beginning"));
-                        clicked => { root.seek(0); }
+                        clicked => { root.seek(root.reverse ? root.duration : 0); }
                     }
                     ClassicTool {
                         height: 28px * Theme.ui-scale; icon: @image-url("icons/play.svg");
@@ -1248,6 +1252,13 @@ component ClassicAuditionPanel inherits Rectangle {
                 active: root.repeat; checkable: true;
                 hint: root.repeat ? (root.chinese ? "循环已开启，点击关闭" : "Repeat is on; click to turn off") : (root.chinese ? "循环已关闭，点击开启" : "Repeat is off; click to turn on");
                 clicked => { root.repeat = !root.repeat; root.transform(root.pitch-text, root.rate-text, root.mono, root.repeat); }
+            }
+            ClassicTool {
+                width: 86px * Theme.ui-scale; symbol: root.chinese ? "反向 · R" : "Reverse · R";
+                label: root.chinese ? "反向音频" : "Reverse audio"; active: root.reverse; checkable: true;
+                enabled: root.transport-ready && root.reverse-supported && !root.selection-preparing && !root.selection-gesture;
+                hint: !root.reverse-supported ? (root.chinese ? "反向试听需要本地原素材" : "Reverse preview requires a local original") : (root.chinese ? "向后试听并反向导出 · R" : "Preview backwards and export reversed · R");
+                clicked => { root.reverse = !root.reverse; root.transform(root.pitch-text, root.rate-text, root.mono, root.repeat); }
             }
             Rectangle { width: 1px; background: Theme.player-border; }
             Caption { text: root.chinese ? "音高" : "Pitch"; }
@@ -1350,7 +1361,7 @@ component ClassicAuditionPanel inherits Rectangle {
                         root.seek(clamp(root.visual-position + (event.text == Key.LeftArrow ? -nudge : nudge), 0, root.duration));
                         return accept;
                     }
-                    if event.text == Key.Home { root.seek(0); return accept; }
+                    if event.text == Key.Home { root.seek(root.reverse ? root.duration : 0); return accept; }
                     if event.text == "+" || event.text == "=" { root.zoom-change(2); return accept; }
                     if event.text == "-" && root.zoom > 1 { root.zoom-change(0.5); return accept; }
                     if event.text == "0" { root.zoom-change(0); return accept; }
@@ -1509,6 +1520,8 @@ component WorkbenchAuditionPanel inherits Rectangle {
     in-out property <string> rate-text: "1.00";
     in-out property <bool> mono: false;
     in-out property <bool> repeat: false;
+    in-out property <bool> reverse: false;
+    in property <bool> reverse-supported: true;
     callback play(); callback pause(); callback stop(); callback seek(float); callback seek-play(float);
     callback transform(string,string,bool,bool); callback volume(float);
     callback resize(int,int); callback zoom-change(float); callback zoom-at(float,float); callback pan(float);
@@ -1528,11 +1541,12 @@ component WorkbenchAuditionPanel inherits Rectangle {
     property <duration> anchor-tick: 0ms;
     property <float> correction: 0;
     property <duration> progress-elapsed: root.ready && root.playing && root.smooth-progress ? clamp(animation-tick() - root.anchor-tick, 0ms, 100ms) : 0ms;
-    property <float> visual-position: clamp(root.anchor-position + root.progress-elapsed / 1s * root.playback-rate + root.correction * (1 - root.progress-elapsed / 100ms), 0,
+    property <float> visual-position: clamp(root.anchor-position + root.progress-elapsed / 1s * root.playback-rate + root.correction * (1 - root.progress-elapsed / 100ms),
+        root.selection-active && root.selection-end > root.selection-start && root.position >= root.selection-start && root.position <= root.selection-end ? root.selection-start : 0,
         root.selection-active && root.selection-end > root.selection-start && root.position >= root.selection-start && root.position <= root.selection-end ? min(root.duration, root.selection-end) : root.duration);
     function sync-progress(allow-correction: bool) {
         let previous = root.visual-position;
-        let continuous = allow-correction && root.ready && root.playing && root.smooth-progress && abs(previous - root.position) < 0.1 * root.playback-rate;
+        let continuous = allow-correction && root.ready && root.playing && root.smooth-progress && abs(previous - root.position) < 0.1 * abs(root.playback-rate);
         root.anchor-position = root.position;
         root.anchor-tick = animation-tick();
         root.correction = continuous ? previous - root.position : 0;
@@ -1542,6 +1556,7 @@ component WorkbenchAuditionPanel inherits Rectangle {
     changed playing => { root.sync-progress(false); }
     changed smooth-progress => { root.sync-progress(false); }
     changed playback-rate => { root.sync-progress(false); }
+    changed reverse => { root.sync-progress(false); }
     // Transport revisions reset animation; only selection-identity cancels a
     // range gesture, so an automatic preview cannot invalidate its own range.
     changed progress-clock => { root.sync-progress(false); }
@@ -1629,7 +1644,7 @@ component WorkbenchAuditionPanel inherits Rectangle {
                     hint: root.ready ? (root.chinese ? "空格" : "Space") : root.unavailable;
                     clicked => { root.toggle(); }
                 }
-                Tool { width: 32px * Theme.ui-scale; height: 32px * Theme.ui-scale; y: (parent.height - self.height) / 2; subtle: true; icon: @image-url("icons/start.svg"); label: root.chinese ? "回到开头" : "Go to start"; hint: root.transport-hint; enabled: root.ready; clicked => { root.seek(0); } }
+                Tool { width: 32px * Theme.ui-scale; height: 32px * Theme.ui-scale; y: (parent.height - self.height) / 2; subtle: true; icon: @image-url("icons/start.svg"); label: root.chinese ? "回到开头" : "Go to start"; hint: root.transport-hint; enabled: root.ready; clicked => { root.seek(root.reverse ? root.duration : 0); } }
                 Tool { width: 32px * Theme.ui-scale; height: 32px * Theme.ui-scale; y: (parent.height - self.height) / 2; subtle: true; icon: @image-url("icons/stop.svg"); label: root.chinese ? "停止" : "Stop"; hint: root.transport-hint; enabled: root.ready; clicked => { root.stop(); } }
                 Tool { width: 32px * Theme.ui-scale; height: 32px * Theme.ui-scale; y: (parent.height - self.height) / 2; subtle: true; icon: @image-url("icons/repeat.svg"); label: root.chinese ? "循环整个声音" : "Repeat sound"; hint: root.repeat ? (root.chinese ? "已开启" : "On") : ""; active: root.repeat; clicked => { root.repeat = !root.repeat; root.transform(root.pitch-text, root.rate-text, root.mono, root.repeat); } }
             }
@@ -1672,7 +1687,7 @@ component WorkbenchAuditionPanel inherits Rectangle {
                 Text {
                     x: 0px; width: parent.width; height: parent.height; horizontal-alignment: left;
                     accessible-role: text; accessible-label: root.chinese ? "试听时间" : "Audition time";
-                    text: (root.show-remaining ? "−" + Clock.format(max(0, root.duration - root.position)) : root.time) + "  /  " + root.end-time;
+                    text: (root.show-remaining ? "−" + Clock.format(max(0, root.reverse ? root.position : root.duration - root.position)) : root.time) + "  /  " + root.end-time;
                     color: time-touch.has-hover ? Theme.accent-hover : Theme.ink; font-family: "Consolas"; font-size: Theme.font(14); vertical-alignment: center;
                     animate color { duration: Theme.motion-fast; }
                 }
@@ -1725,6 +1740,14 @@ component WorkbenchAuditionPanel inherits Rectangle {
                 Caption { text: root.volume-label; font-size: Theme.font(9); }
                 Rectangle { horizontal-stretch: 1; }
                 Tool { width: 24px * Theme.ui-scale; height: 24px * Theme.ui-scale; subtle: true; icon-size: 16px * Theme.ui-scale; icon: @image-url("icons/reset.svg"); label: root.chinese ? "重置变调与速度" : "Reset Pitch / Rate"; enabled: pitch-field.modified || rate-field.modified; clicked => { root.pitch-text = "0.00"; root.rate-text = "1.00"; root.transform(root.pitch-text, root.rate-text, root.mono, root.repeat); } }
+                Tool {
+                    width: 86px * Theme.ui-scale; height: 24px * Theme.ui-scale; subtle: true;
+                    symbol: root.chinese ? "反向 · R" : "Reverse · R"; symbol-size: Theme.font(10);
+                    label: root.chinese ? "反向音频" : "Reverse audio"; active: root.reverse;
+                    enabled: root.ready && !root.missing && !root.busy && root.reverse-supported && !root.selection-preparing && !root.selection-gesture;
+                    hint: root.chinese ? "向后试听并反向导出 · R" : "Preview backwards and export reversed · R";
+                    clicked => { root.reverse = !root.reverse; root.transform(root.pitch-text, root.rate-text, root.mono, root.repeat); }
+                }
                 Tool { width: 44px * Theme.ui-scale * root.font-factor; height: 24px * Theme.ui-scale; subtle: true; symbol: root.chinese ? "单声道" : "Mono"; symbol-size: Theme.font(10); label: root.chinese ? "单声道监听" : "Mono monitoring"; hint: root.mono ? (root.chinese ? "已开启" : "On") : ""; active: root.mono; clicked => { root.mono = !root.mono; root.transform(root.pitch-text, root.rate-text, root.mono, root.repeat); } }
                 Rectangle { width: 1px; height: 14px * Theme.ui-scale; y: (parent.height - self.height) / 2; background: Theme.border; }
                 Tool { width: 22px * Theme.ui-scale; height: 24px * Theme.ui-scale; subtle: true; symbol: "−"; symbol-size: Theme.font(14); label: root.chinese ? "缩小波形" : "Zoom out"; enabled: root.ready && root.zoom > 1; clicked => { root.zoom-change(0.5); } }
@@ -1871,7 +1894,7 @@ component WorkbenchAuditionPanel inherits Rectangle {
                             root.seek(clamp(root.visual-position + (event.text == Key.LeftArrow ? -nudge : nudge), 0, root.duration));
                             return accept;
                         }
-                        if event.text == Key.Home { root.seek(0); return accept; }
+                        if event.text == Key.Home { root.seek(root.reverse ? root.duration : 0); return accept; }
                         if event.text == "+" || event.text == "=" { root.zoom-change(2); return accept; }
                         if event.text == "-" && root.zoom > 1 { root.zoom-change(0.5); return accept; }
                         if event.text == "0" { root.zoom-change(0); return accept; }
@@ -2082,6 +2105,8 @@ export component AuditionPanel inherits Rectangle {
     in-out property <string> rate-text: "1.00";
     in-out property <bool> mono: false;
     in-out property <bool> repeat: false;
+    in-out property <bool> reverse: false;
+    in property <bool> reverse-supported: true;
     callback play(); callback pause(); callback stop(); callback seek(float); callback seek-play(float);
     callback transform(string,string,bool,bool); callback volume(float);
     callback resize(int,int); callback zoom-change(float); callback zoom-at(float,float); callback pan(float);
@@ -2169,6 +2194,7 @@ export component AuditionPanel inherits Rectangle {
         rate-text <=> root.rate-text;
         mono <=> root.mono;
         repeat <=> root.repeat;
+        reverse <=> root.reverse; reverse-supported: root.reverse-supported;
         volume-focus-changed(adjusting) => { root.presenter-volume-adjusting = adjusting; }
         play => { root.play(); }
         pause => { root.pause(); }
@@ -2252,6 +2278,7 @@ export component AuditionPanel inherits Rectangle {
         rate-text <=> root.rate-text;
         mono <=> root.mono;
         repeat <=> root.repeat;
+        reverse <=> root.reverse; reverse-supported: root.reverse-supported;
         volume-focus-changed(adjusting) => { root.presenter-volume-adjusting = adjusting; }
         premute-db <=> root.premute-db;
         show-remaining <=> root.show-remaining;

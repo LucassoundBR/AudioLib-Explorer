@@ -1863,8 +1863,23 @@ impl Controller {
                     rate,
                     mono,
                     loop_enabled: repeat,
+                    reverse: c.ui.upgrade().is_some_and(|ui| ui.get_audition_reverse()),
                 });
             if let Some(settings) = settings.filter(|settings| settings.validate().is_ok()) {
+                let current = c.audio.status().audition;
+                if settings.reverse != current.reverse && !c.reverse_selection_ready() {
+                    if let Some(ui) = c.ui.upgrade() {
+                        publish_audition(&ui, current);
+                    }
+                    c.status(
+                        c.localized(
+                            "请等待选区试听准备完成",
+                            "Wait for the selection preview before changing Reverse",
+                        )
+                        .into(),
+                    );
+                    return;
+                }
                 c.command(AudioCommand::SetAudition(settings));
             } else if let Some(ui) = c.ui.upgrade() {
                 publish_audition(&ui, c.audio.status().audition);
@@ -4323,6 +4338,7 @@ impl Controller {
                         if publication.audition != Some(status.audition) {
                             publish_audition(&ui, status.audition);
                             publication.audition = Some(status.audition);
+                            c2.refresh_slice_reverse(&ui, status.audition.reverse);
                         }
                         ui.set_output_summary(output_summary(&status).into());
                         if !protected_status && publication.error.as_ref() != Some(&playback_error)
@@ -8665,9 +8681,17 @@ pub(crate) fn publish_playback_progress(
     status: &audiolib_audio::PlaybackStatus,
     progress_continues: bool,
 ) {
-    let forward_step = status.position as f32 - ui.get_play_position();
+    let direction = if status.audition.reverse { -1.0 } else { 1.0 };
+    let forward_step = (status.position as f32 - ui.get_play_position()) * direction;
     ui.set_playback_clock(format!("{}:{}", status.generation, status.transport_revision).into());
-    ui.set_confirmed_playback_rate(status.audition.rate);
+    ui.set_confirmed_playback_rate(status.audition.rate * direction);
+    ui.set_confirmed_reverse(status.audition.reverse);
+    ui.set_reverse_supported(
+        status
+            .file_path
+            .as_ref()
+            .is_some_and(|path| !audiolib_audio::is_stream_source(path)),
+    );
     ui.set_playback_smooth(
         progress_continues
             && status.state == PlaybackState::Playing
@@ -8776,6 +8800,8 @@ pub(crate) fn rejected_audition_fields(pitch: &str, rate: &str) -> i32 {
 }
 
 fn publish_audition(ui: &AppWindow, settings: AuditionSettings) {
+    ui.set_audition_reverse(settings.reverse);
+    ui.set_confirmed_reverse(settings.reverse);
     ui.set_pitch_text(format!("{:.2}", settings.pitch_semitones).into());
     ui.set_speed_text(format!("{:.2}", settings.rate).into());
     ui.set_audition_mono(settings.mono);
@@ -11209,6 +11235,7 @@ mod tests {
                 rate: 0.75,
                 mono: true,
                 loop_enabled: true,
+                reverse: false,
             },
         };
         let expected = serde_json::to_value(&playback).unwrap();

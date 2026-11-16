@@ -170,3 +170,67 @@ fn shift_wheel_pans_without_zooming_or_changing_the_selection() {
     assert!((pan.get() - (0.5 + 0.25 / 3.0)).abs() < 0.001);
     ui.hide().unwrap();
 }
+
+#[test]
+fn reverse_button_and_r_preserve_editor_modal_busy_and_send_acknowledgment_guards() {
+    i_slint_backend_testing::init_no_event_loop();
+    let ui = player();
+    let changes = Rc::new(RefCell::new(Vec::new()));
+    let observed = changes.clone();
+    let weak = ui.as_weak();
+    ui.on_transform_requested(move |_, _, _, _| {
+        observed
+            .borrow_mut()
+            .push(weak.upgrade().unwrap().get_audition_reverse())
+    });
+    let sends = Rc::new(Cell::new(0));
+    let observed = sends.clone();
+    ui.on_reaper_send_requested(move || observed.set(observed.get() + 1));
+    let key = |text: slint::SharedString| {
+        ui.window()
+            .dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
+        ui.window()
+            .dispatch_event(WindowEvent::KeyReleased { text });
+        settle();
+    };
+    key("r".into());
+    assert!(ui.get_audition_reverse());
+    assert_eq!(&*changes.borrow(), &[true]);
+    key("s".into());
+    assert_eq!(sends.get(), 0, "Send waits for the accepted direction");
+    ui.set_confirmed_reverse(true);
+    key("s".into());
+    assert_eq!(sends.get(), 1);
+    control(&ui, "Reverse audio").mock_single_click(PointerEventButton::Left);
+    settle();
+    assert!(!ui.get_audition_reverse());
+    assert_eq!(&*changes.borrow(), &[true, false]);
+    let search = ElementHandle::find_by_element_id(&ui, "AppWindow::search-input")
+        .next()
+        .unwrap();
+    search.mock_single_click(PointerEventButton::Left);
+    key("r".into());
+    assert!(ui.get_search_entry_text().contains('r'));
+    assert_eq!(changes.borrow().len(), 2);
+    ui.set_reaper_setup_visible(true);
+    key("r".into());
+    assert_eq!(changes.borrow().len(), 2);
+    key(Key::Escape.into());
+    for gate in 0..5 {
+        ui.set_wave_selection_preparing(false);
+        ui.set_reaper_busy(false);
+        ui.set_reverse_supported(true);
+        ui.set_selected_missing(false);
+        ui.set_audio_ready(true);
+        match gate {
+            0 => ui.set_wave_selection_preparing(true),
+            1 => ui.set_reaper_busy(true),
+            2 => ui.set_reverse_supported(false),
+            3 => ui.set_selected_missing(true),
+            _ => ui.set_audio_ready(false),
+        }
+        key("r".into());
+        assert_eq!(changes.borrow().len(), 2, "blocked gate {gate}");
+    }
+    ui.hide().unwrap();
+}

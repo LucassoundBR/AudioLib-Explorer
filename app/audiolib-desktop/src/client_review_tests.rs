@@ -435,6 +435,7 @@ fn child_queued_playback_error() {
         rate: 1.25,
         mono: true,
         loop_enabled: true,
+        reverse: false,
     };
     let transformed = controller
         .audio

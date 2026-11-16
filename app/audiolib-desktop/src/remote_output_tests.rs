@@ -162,6 +162,7 @@ fn child_remote_source_pair() {
             rate: 0.5,
             mono: true,
             loop_enabled: true,
+            reverse: false,
         };
         engine
             .handle()

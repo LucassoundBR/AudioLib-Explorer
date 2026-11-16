@@ -188,6 +188,7 @@ struct Selection {
     render_cancel: Arc<AtomicBool>,
     preview_cancel: Arc<AtomicBool>,
     preview_ready: Arc<AtomicBool>,
+    reverse: bool,
 }
 
 impl Selection {
@@ -337,6 +338,21 @@ impl Controller {
             return;
         }
         let busy = ReaperBusy(self.clone());
+        let reverse = self.audio.status().audition.reverse;
+        if self
+            .ui
+            .upgrade()
+            .is_some_and(|ui| ui.get_audition_reverse() != reverse)
+        {
+            self.status(
+                self.localized(
+                    "正在应用反向，请稍候",
+                    "Applying Reverse; wait a moment before sending",
+                )
+                .into(),
+            );
+            return;
+        }
         let (range, ready) = {
             let state = self.slice.lock().unwrap();
             (state.selection.clone(), state.ready.clone())
@@ -346,6 +362,19 @@ impl Controller {
                 self.localized(
                     "切片尚在准备，请就绪后再发送",
                     "The selection is still preparing; send it when ready",
+                )
+                .into(),
+            );
+            return;
+        }
+        if range
+            .as_ref()
+            .is_some_and(|selection| selection.reverse != reverse)
+        {
+            self.status(
+                self.localized(
+                    "正在准备反向切片，请稍候",
+                    "The direction changed; wait for the new WAV before sending",
                 )
                 .into(),
             );
@@ -401,8 +430,44 @@ impl Controller {
                         return Err("For a server sound, select a waveform region and wait for the original-quality WAV to be ready before sending".into());
                     }
                     let roots = c.config.lock().unwrap().allowed_scan_roots.clone();
-                    audiolib_core::validate_audio_path(Path::new(&file.file_path), &roots)
-                        .map_err(|e| e.to_string())?
+                    let source =
+                        audiolib_core::validate_audio_path(Path::new(&file.file_path), &roots)
+                            .map_err(|e| e.to_string())?;
+                    if reverse {
+                        let export_directory = c.slice_directory().map_err(|e| e.to_string())?;
+                        std::fs::create_dir_all(&export_directory).map_err(|e| e.to_string())?;
+                        let export_directory =
+                            export_directory.canonicalize().map_err(|e| e.to_string())?;
+                        let staging = crate::slice_staging::prepare_staging(&export_directory)
+                            .map_err(|e| e.to_string())?;
+                        let rendered = staging.directory.path().join("reverse.wav");
+                        let mut last = Instant::now() - Duration::from_secs(1);
+                        audiolib_audio::export_reversed_audio_file(
+                            &source,
+                            &rendered,
+                            &c.closing,
+                            &mut |done, total| {
+                                if last.elapsed() >= Duration::from_millis(100) || done == total {
+                                    last = Instant::now();
+                                    let percent =
+                                        done.saturating_mul(100).checked_div(total).unwrap_or(0);
+                                    c.status(format!("Rendering Reverse WAV {percent}%"));
+                                }
+                            },
+                        )
+                        .map_err(|e| e.to_string())?;
+                        let stem = format!("{}-reverse", slice_stem(&file.filename));
+                        let mut published = publish_numbered_slice(
+                            &rendered,
+                            &export_directory,
+                            &stem,
+                            &c.closing,
+                        )?;
+                        published.keep = true;
+                        published.path.clone()
+                    } else {
+                        source
+                    }
                 };
                 // Close drains slice workers before setting the final shutdown
                 // flag, so the close-intent flag must cancel this bounded wait.
@@ -593,6 +658,42 @@ impl Controller {
                 })
     }
 
+    pub(super) fn reverse_selection_ready(&self) -> bool {
+        self.slice
+            .lock()
+            .unwrap()
+            .selection
+            .as_ref()
+            .is_none_or(|selection| selection.preview_ready.load(Ordering::Acquire))
+    }
+
+    /// Re-render only the export generation; an accepted direction change must
+    /// not restart preview, lose its original range or cancel its source reader.
+    pub(super) fn refresh_slice_reverse(self: &Arc<Self>, ui: &AppWindow, reverse: bool) {
+        let selection = {
+            let mut state = self.slice.lock().unwrap();
+            let Some(mut selection) = state.selection.take() else {
+                return;
+            };
+            if selection.reverse == reverse {
+                state.selection = Some(selection);
+                return;
+            }
+            selection.render_cancel.store(true, Ordering::Release);
+            // The range/source revision also admits an in-flight preview. Keep
+            // it stable; the replaced render token alone retires old WAV jobs.
+            selection.reverse = reverse;
+            selection.render_cancel = Arc::new(AtomicBool::new(false));
+            state.ready = None;
+            state.published = None;
+            state.drag_requested = false;
+            state.selection = Some(selection.clone());
+            selection
+        };
+        show_export_feedback(ui, ExportFeedback::Preparing);
+        self.prepare_wave_slice(selection);
+    }
+
     fn slice_directory(&self) -> audiolib_core::Result<PathBuf> {
         let configured = self.config.lock().unwrap().slice_export_directory.clone();
         match configured {
@@ -703,6 +804,7 @@ impl Controller {
                 render_cancel: Arc::new(AtomicBool::new(false)),
                 preview_cancel,
                 preview_ready: Arc::new(AtomicBool::new(false)),
+                reverse: self.audio.status().audition.reverse,
             };
             state.selection = Some(selection.clone());
             selection
@@ -1238,7 +1340,9 @@ impl Controller {
                     .map_err(|e| e.to_string())?;
                 let path = directory.directory.path().join("slice.wav");
                 let mut last = Instant::now() - Duration::from_secs(1);
-                audiolib_audio::export_audio_slice(
+                let export = if selection.reverse { audiolib_audio::export_reversed_audio_slice }
+                    else { audiolib_audio::export_audio_slice };
+                export(
                     &source,
                     &path,
                     selection.range,
@@ -1269,7 +1373,8 @@ impl Controller {
                     _directory: directory,
                     path,
                     export_directory,
-                    stem: slice_stem(&selection.source.file.filename),
+                    stem: if selection.reverse { format!("{}-reverse", slice_stem(&selection.source.file.filename)) }
+                        else { slice_stem(&selection.source.file.filename) },
                     local_source,
                 }))
             })();

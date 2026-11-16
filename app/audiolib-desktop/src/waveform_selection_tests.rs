@@ -209,6 +209,7 @@ fn selection(
         render_cancel: Arc::new(AtomicBool::new(false)),
         preview_cancel: Arc::new(AtomicBool::new(false)),
         preview_ready: Arc::new(AtomicBool::new(true)),
+        reverse: false,
     }
 }
 
@@ -287,6 +288,46 @@ fn child_reaper_send() {
         Path::new(&f.b.file_path).canonicalize().unwrap()
     );
 
+    // Sending before the audio worker acknowledges a direction must not silently
+    // submit the original. The peer is an owned file protocol, never a native host.
+    f.ui.set_audition_reverse(true);
+    f.c.send_to_reaper();
+    assert!(!f.c.reaper_busy.load(Ordering::Acquire));
+    assert!(!bridge.join("request.txt").exists());
+    f.c.audio
+        .send_and_wait(
+            AudioCommand::SetAudition(AuditionSettings {
+                reverse: true,
+                ..Default::default()
+            }),
+            Duration::from_secs(2),
+        )
+        .unwrap();
+    f.ui.set_confirmed_reverse(true);
+    *f.c.selected.lock().unwrap() = Some(f.a.clone());
+    session();
+    let receiver = peer();
+    f.c.send_to_reaper();
+    let c = f.c.clone();
+    wait_for(&f.ui, move || {
+        !c.reaper_busy.load(Ordering::Acquire) && c.slice.lock().unwrap().workers == 0
+    });
+    let reversed_whole = receiver.join().unwrap();
+    assert_ne!(reversed_whole, PathBuf::from(&f.a.file_path));
+    assert_eq!(
+        std::fs::read(&reversed_whole).unwrap(),
+        wav(&(0..1000).rev().collect::<Vec<i16>>(), 1000)
+    );
+    f.c.audio
+        .send_and_wait(
+            AudioCommand::SetAudition(AuditionSettings::default()),
+            Duration::from_secs(2),
+        )
+        .unwrap();
+    f.ui.set_audition_reverse(false);
+    f.ui.set_confirmed_reverse(false);
+    *f.c.selected.lock().unwrap() = Some(f.b.clone());
+
     // The waveform deliberately describes A while the inspector still shows B.
     let source = bind_displayed(&f);
     let selected = selection(
@@ -323,6 +364,45 @@ fn child_reaper_send() {
         (info.frames, info.sample_rate, info.bit_depth, info.channels),
         (400, 1000, 16, 1)
     );
+    // Refreshing only the render direction must preserve the current interval,
+    // source revision and preview token while replacing the old prepared WAV.
+    let before = f.c.slice.lock().unwrap().selection.clone().unwrap();
+    f.c.audio
+        .send_and_wait(
+            AudioCommand::SetAudition(AuditionSettings {
+                reverse: true,
+                ..Default::default()
+            }),
+            Duration::from_secs(2),
+        )
+        .unwrap();
+    f.ui.set_audition_reverse(true);
+    f.ui.set_confirmed_reverse(true);
+    f.c.refresh_slice_reverse(&f.ui, true);
+    let c = f.c.clone();
+    wait_for(&f.ui, move || {
+        let state = c.slice.lock().unwrap();
+        state.selection.as_ref().is_some_and(|s| s.reverse) && state.ready.is_some()
+    });
+    let after = f.c.slice.lock().unwrap().selection.clone().unwrap();
+    assert_eq!(after.range, before.range);
+    assert_eq!(after.revision, before.revision);
+    assert!(before.render_cancel.load(Ordering::Acquire));
+    assert!(!before.preview_cancel.load(Ordering::Acquire));
+    session();
+    let receiver = peer();
+    f.c.send_to_reaper();
+    let c = f.c.clone();
+    wait_for(&f.ui, move || {
+        !c.reaper_busy.load(Ordering::Acquire) && c.slice.lock().unwrap().workers == 0
+    });
+    let reversed_region = receiver.join().unwrap();
+    assert_ne!(reversed_region, exported);
+    assert_eq!(
+        std::fs::read(&reversed_region).unwrap(),
+        wav(&(200..600).rev().collect::<Vec<i16>>(), 1000)
+    );
+    assert!(reversed_whole.is_file() && reversed_region.is_file());
     f.c.cancel_all_slices();
     assert!(
         exported.is_file(),

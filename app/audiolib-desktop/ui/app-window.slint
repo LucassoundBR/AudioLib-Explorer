@@ -951,7 +951,7 @@ export component AppWindow inherits Window {
     callback reaper-send-requested();
     callback reaper-setup-requested();
     callback reaper-reveal-requested();
-    property <bool> reaper-send-ready: root.reaper-supported && (root.wave-selection-active ? !root.wave-selection-preparing : root.has-selection && !root.selected-missing);
+    property <bool> reaper-send-ready: root.reaper-supported && root.audition-reverse == root.confirmed-reverse && (root.wave-selection-active ? !root.wave-selection-preparing : root.has-selection && !root.selected-missing);
     changed reaper-setup-visible => { if root.reaper-setup-visible { reaper-setup-dialog.focus(); } }
     private property <length> application-footer-height: max(20px * Theme.ui-scale, Theme.font(10) + 6px * Theme.ui-scale);
     private property <string> application-status-text: root.drag-preparing && root.drag-progress != "" ? root.drag-progress
@@ -1589,6 +1589,9 @@ export component AppWindow inherits Window {
     in-out property <string> speed-text: "1.00";
     in-out property <bool> audition-mono: false;
     in-out property <bool> audition-repeat: false;
+    in-out property <bool> audition-reverse: false;
+    in property <bool> confirmed-reverse: false;
+    in property <bool> reverse-supported: true;
     in-out property <bool> audition-play-on-single-click: false;
     callback single-click-play-requested(bool);
     in-out property <float> volume-db: -1.9;
@@ -2862,6 +2865,11 @@ export component AppWindow inherits Window {
         }
         key-pressed(event) => {
             root.wave-selection-shift-held = event.modifiers.shift || event.text == Key.Shift;
+            if (event.text == "r" || event.text == "R") && !event.modifiers.control && !event.modifiers.alt && !event.modifiers.meta && !root.background-blocked && !root.reaper-busy && !root.wave-selection-gesture && !root.wave-selection-preparing && root.audio-ready && !root.selected-missing && root.reverse-supported {
+                root.audition-reverse = !root.audition-reverse;
+                root.transform-requested(root.pitch-text, root.speed-text, root.audition-mono, root.audition-repeat);
+                return accept;
+            }
             if (event.text == "s" || event.text == "S") && !event.modifiers.control && !event.modifiers.alt && !event.modifiers.meta && !root.background-blocked && !root.reaper-busy && !root.wave-selection-gesture && root.reaper-send-ready {
                 root.reaper-send-requested(); return accept;
             }
@@ -3721,6 +3729,7 @@ main-scroll := ScrollView {
             view-start: root.view-start; view-end: root.view-end; zoom: root.wave-zoom; ruler-ticks: root.ruler-ticks;
             scroll <=> root.wave-scroll; volume-db <=> root.volume-db; volume-label: root.volume-label;
             pitch-text <=> root.pitch-text; rate-text <=> root.speed-text; mono <=> root.audition-mono; repeat <=> root.audition-repeat;
+            reverse <=> root.audition-reverse; reverse-supported: root.reverse-supported && !root.reaper-busy;
             play => { root.start-requested(); } pause => { root.pause-requested(); } stop => { root.stop-requested(); }
             seek(value) => { root.seek-requested(value); }
             seek-play(value) => { root.seek-play-requested(value); }
@@ -4595,6 +4604,7 @@ main-scroll := ScrollView {
             view-start: root.view-start; view-end: root.view-end; zoom: root.wave-zoom; ruler-ticks: root.ruler-ticks;
             scroll <=> root.wave-scroll; volume-db <=> root.volume-db; volume-label: root.volume-label;
             pitch-text <=> root.pitch-text; rate-text <=> root.speed-text; mono <=> root.audition-mono; repeat <=> root.audition-repeat;
+            reverse <=> root.audition-reverse; reverse-supported: root.reverse-supported && !root.reaper-busy;
             play => { root.start-requested(); } pause => { root.pause-requested(); } stop => { root.stop-requested(); }
             seek(value) => { root.seek-requested(value); }
             seek-play(value) => { root.seek-play-requested(value); }

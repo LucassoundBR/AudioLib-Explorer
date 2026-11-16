@@ -935,6 +935,41 @@ fn predicted_playhead_does_not_advance_past_selection_end() {
 }
 
 #[test]
+fn reverse_playhead_moves_backwards_and_stops_at_the_original_selection_start() {
+    i_slint_backend_testing::init_no_event_loop();
+    for modern in [false, true] {
+        let ui = window(modern);
+        ui.set_wave_selection_start(4.0);
+        ui.set_wave_selection_end(8.0);
+        ui.set_wave_selection_active(true);
+        ui.set_audition_reverse(true);
+        ui.set_play_position(4.1);
+        ui.set_confirmed_playback_rate(-4.0);
+        ui.set_playback_smooth(true);
+        ui.set_playing(true);
+        ui.set_playback_clock("reverse-selected-range".into());
+        let fraction = || {
+            i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+            let wave = ElementHandle::find_by_accessible_label(&ui, "Waveform timeline")
+                .next()
+                .unwrap();
+            let played = ElementHandle::find_by_accessible_label(&ui, "Played waveform region")
+                .next()
+                .unwrap();
+            played.size().width / wave.size().width
+        };
+        assert!((fraction() - 0.205).abs() < 0.0001);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(16));
+        assert!((fraction() - 0.2018).abs() < 0.0001);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(16));
+        assert!((fraction() - 0.2).abs() < 0.0001);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(100));
+        assert!((fraction() - 0.2).abs() < 0.0001);
+        ui.hide().unwrap();
+    }
+}
+
+#[test]
 fn export_folder_choice_is_reachable_in_both_languages() {
     i_slint_backend_testing::init_no_event_loop();
     for chinese in [false, true] {
