@@ -1,5 +1,48 @@
 # Night UI implementation checkpoints
 
+## Reverse candidate prepared; native acceptance deferred — 2026-11-16
+
+Source cb56405 (audio checkpoint bb84a12) passed the scoped checks recorded below.
+The Windows x64 ASIO release build PASS (27m29s), followed by matching license,
+privacy, updater-file-policy and ZIP checks PASS (906 ZIP entries). Candidate:
+dist/latest/portable and dist/latest/AudioLibExplorer-latest-win-x64-portable.zip.
+The packaged CLI reports1.0.0. No release, tag or merge was published.
+
+Candidate desktop SHA256:C616DF97641481A5D14CC7A26BC1B5BFAF6886C47AF729F616A9F244E8F14DC4.
+Candidate CLI SHA256:A9D30BE4E8C58519C185DEB4EF769D723A20991F1E1B9F39575D607689503C0C.
+Archive SHA256:6B4BD83AF395C5E90423D3FDA930D536F5806FDCE3C58E62E6EB89CAC9F93018.
+Evidence: .rust-validation/night-ui/reverse-release.log. Classic normal/spectral
+and alternate Studio normal renders were inspected; the added Reverse control
+fits. This is rendered/testing-backend evidence, not native input acceptance.
+
+The user had authorized interactive validation, but Computer Use then reported
+that physical Escape stopped control. No further Computer Use or GUI launch
+was attempted. Reverse native interaction, real runtime IPC/playback, portable
+startup acceptance and installation remain NOT RUN. In particular, no new
+REAPER-host, Auto-Focus, physical audio or hardware-latency result is claimed.
+The accepted8842947 application remains installed at fixed local_release, with
+its desktop hash freshly confirmed as4E7E512E9E3B814FEF0BABD6B2CFE65810898A79A5EC2E24FD531483106B31C3.
+Working applications, normal data selection, libraries and source audio were
+not changed by this candidate build. Reverse is not an installed delivery yet.
+
+Next, in a newly authorized interactive window, reuse this exact candidate:
+gracefully close the normal AudioLib if required; run validate-playback-ipc.ps1
+with BinaryDirectory dist/latest/portable and CleanCheckout; run
+validate-portable.ps1 against that directory once; verify native R/button,
+backwards source/range progress, selection export and settings retention with
+the owned muted fixture; then install-local-release.ps1 and verify identity/
+isolated installed startup. Reuse the dedicated Dummy Audio profile for any
+new REAPER host/focus test, not the normal profile. Do not rebuild or repeat
+passing source checks unless relevant source/features/toolchain changed.
+Sol6.1 Medium is sufficient for this acceptance/install sequence; use High if
+an actual new transport/DSP defect requires diagnosis.
+
+End-of-checkpoint cache maintenance PASS:40GiB development-cache budget met;
+40,198,770,169 logical bytes retained (about37.44GiB), zero removed. Release,
+SDKs, Cargo/Rustup home, installations, data/audio and evidence were preserved.
+Evidence: .rust-validation/night-ui/reverse-cache-maintenance.log. Quota snapshot:
+17% short-window /71% weekly remaining; no new features started at this boundary.
+
 ## Delivery completed — 2026-11-16
 
 The pending application delivery below is now complete for source8842947.
