@@ -117,7 +117,7 @@ fn export_reaper_waveform_visual_previews() {
         ui.global::<Theme>().set_modern_player(modern);
         ui.global::<Theme>().set_motion(0.0);
         ui.window()
-            .set_size(slint::LogicalSize::new(1440.0, 1000.0));
+            .set_size(slint::LogicalSize::new(1920.0, 1000.0));
         ui.set_reaper_supported(true);
         ui.set_has_selection(true);
         ui.set_waveform_ready(true);

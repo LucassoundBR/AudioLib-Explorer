@@ -52,3 +52,57 @@ Strict desktop Clippy, final UI integration and packaged acceptance remain for
 the combined delivery. Existing unchanged audio, database, IPC and server
 behavior retains the accepted 3e35c96/ab6d89c baseline; no related storage,
 concurrency, dependency or audio-backend boundary changed in this checkpoint.
+
+## Classic toolbar integration checkpoint
+
+The default/Classic presentation now combines Send, Auto-Focus and Connect with
+transport, numeric Pitch/Rate, their new sliders, monitoring gain and Mono. The
+lower pan/zoom strip is removed; the player height absorbs the recovered Send
+row so the Waveform gets that space. Display Gain occupies a narrow lane at the
+Waveform's right edge and binds the existing peak-gain/peak-style callback.
+Pitch/Rate retain -24..24st and0.25..4x engine limits; visual gain retains
+-12..36dB. The alternate Studio presentation is preserved.
+
+Current run: .rust-validation/night-ui/check-ui-final.log. Initial strict desktop
+Clippy PASS. The initial four interaction tests failed because their generated
+Slint output was still the old UI: Copy-Item preserved older draft timestamps.
+The Clippy output contained the new controls while the build/test output did
+not. Source timestamps were refreshed to invalidate the stale build; never
+reuse that failed run as current UI evidence. Follow-up navigation/accessibility,
+matching ruler bounds and obsolete zoom-bar test adaptation are now applied.
+The final check includes
+those changed tests, the new audition_toolbar_tests, selection gestures, S,
+bilingual slider names, compact vertical visibility and wheel anchor behavior.
+The synthetic 12s/48kHz/24bit stereo fixture and empty owned library are under
+.rust-validation/night-ui; monitoring volume is zero. Working audio/data remain
+untouched. No REAPER host acceptance is claimed from a UI-only binding check.
+
+Checkpoint 2: formatting PASS; strict desktop Clippy PASS;34 selected tests PASS
+(4 new toolbar interactions,17 selection gestures,1 S guard,6 window-layout,
+1 existing themed-control interaction,1 bilingual slider check,1 pan readiness,
+1 compact vertical visibility,1 wheel/ruler anchor,1 explicit visual export).
+The intentional visual-export test ran separately after the normal filtered
+tests; another existing ignored snapshot exporter was not requested. Classic
+normal and spectral1920px renders were inspected: all toolbar controls visible,
+larger full-width bottom Waveform, vertical visual gain, no lower zoom strip.
+Test evidence: check-ui-final.log and ui-snapshots/classic-{normal,spectral}.png.
+
+Quota reached4% short-window/85% weekly remaining. Stop at this validated
+development checkpoint; Reverse is deferred. Preview build completion and cache
+maintenance are recorded below. The final preview binary build PASS (7m24s);
+it has not replaced the daily installation. No new application delivery is claimed:
+release ASIO build/package, portable acceptance, final native interaction and
+verified installation into local_release remain pending. The existing daily
+installation and the user's running instance remain untouched. Next action:
+resume with tools/build-release.ps1 after matching license preflight, package
+once, validate-portable once, gracefully close the daily app in an agreed window
+and install/verify the accepted payload. Private deliver.ps1 prepares the
+build/package/acceptance sequence and does not install or publish anything.
+
+End-of-checkpoint cache maintenance PASS: 40GiB debug budget met; logical
+estimates59.38GiB before,33.59GiB removed,25.78GiB retained. Current target
+preview and all release outputs were retained; older owned debug/host-preview
+profile directories were pruned. SDKs, Cargo/Rustup home, dist, installations,
+validation evidence and source audio/data were preserved. Evidence:
+.rust-validation/night-ui/cache-maintenance.log. This is a logical byte estimate,
+not a measurement of reclaimed physical storage.

@@ -3677,13 +3677,13 @@ main-scroll := ScrollView {
             }
         }
 
-        ReaperSendBar {
-            height: root.reaper-supported ? 30px * Theme.ui-scale : 0px; visible: root.reaper-supported;
-            chinese: root.chinese; ready: root.reaper-send-ready; busy: root.reaper-busy; blocked: root.background-blocked;
-            auto-focus <=> root.reaper-auto-focus;
-            send => { root.reaper-send-requested(); } setup => { root.reaper-setup-requested(); }
-        }
         audition := AuditionPanel {
+            reaper-supported: root.reaper-supported; reaper-ready: root.reaper-send-ready;
+            reaper-busy: root.reaper-busy; reaper-blocked: root.background-blocked;
+            reaper-auto-focus <=> root.reaper-auto-focus;
+            reaper-send => { root.reaper-send-requested(); } reaper-setup => { root.reaper-setup-requested(); }
+            display-gain <=> root.peak-gain;
+            display-gain-changed => { root.peak-style-requested(); }
             selection-active: root.wave-selection-active; selection-start: root.wave-selection-start; selection-end: root.wave-selection-end;
             selection-identity: root.wave-selection-identity; selection-preparing: root.wave-selection-preparing; selection-progress: root.wave-selection-progress;
             selection-export-state: root.wave-selection-export-state; selection-native-cursor: root.wave-native-cursor;
@@ -3698,7 +3698,7 @@ main-scroll := ScrollView {
             active: !Theme.modern-style;
             premute-db <=> root.audition-premute-db;
             show-remaining <=> root.audition-show-remaining;
-            height: Theme.modern-player ? max(114px * Theme.ui-scale, root.audition-preferred-height) : (root.short-layout ? 176px : 204px) * Theme.ui-scale + self.selection-feedback-height;
+            height: Theme.modern-player ? max(114px * Theme.ui-scale, root.audition-preferred-height) : (root.short-layout ? 210px : 238px) * Theme.ui-scale + self.selection-feedback-height;
             expanded: root.audition-expanded;
             narrow: root.content-width < 1440px * Theme.ui-scale;
             waveform-mask: root.waveform-mask;

@@ -3,6 +3,8 @@
 mod album_override_migration;
 mod artwork;
 #[cfg(test)]
+mod audition_toolbar_tests;
+#[cfg(test)]
 mod close_tests;
 mod controller;
 mod detail_presentation;

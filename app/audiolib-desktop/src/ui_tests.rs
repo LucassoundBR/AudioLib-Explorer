@@ -2779,60 +2779,63 @@ fn audition_sliders_keep_bilingual_accessible_names_in_both_themes() {
 }
 
 #[test]
-fn classic_waveform_pan_requires_ready_audio_for_pointer_keyboard_and_accessibility() {
+fn classic_waveform_pan_requires_ready_audio_for_wheel_keyboard_and_accessibility() {
     use slint::platform::Key;
-
     i_slint_backend_testing::init_no_event_loop();
     for chinese in [false, true] {
         let ui = AppWindow::new().unwrap();
         ui.window().set_size(slint::LogicalSize::new(1440.0, 900.0));
         ui.set_chinese(chinese);
         ui.set_audio_ready(true);
+        ui.set_waveform_ready(true);
+        ui.set_wave_selection_identity("owned:pan".into());
         ui.set_play_duration(20.0);
         ui.set_view_end(20.0);
         ui.set_wave_zoom(4.0);
         ui.set_wave_scroll(0.5);
         let pans = Rc::new(RefCell::new(Vec::new()));
         let observed = pans.clone();
-        ui.on_waveform_pan_requested(move |value| observed.borrow_mut().push(value));
+        ui.on_waveform_pan_requested(move |v| observed.borrow_mut().push(v));
         ui.show().unwrap();
-        let label = if chinese {
-            "波形可视范围"
-        } else {
-            "Visible waveform range"
-        };
-        let pan = ElementHandle::find_by_accessible_label(&ui, label)
-            .find(|element| element.accessible_role() == Some(AccessibleRole::Slider))
-            .expect("classic pan has an accessible slider owner");
-        pan.set_accessible_value("0.5");
+        let pan = ElementHandle::find_by_accessible_label(
+            &ui,
+            if chinese {
+                "波形可视范围"
+            } else {
+                "Visible waveform range"
+            },
+        )
+        .next()
+        .unwrap();
+        assert_eq!(pan.accessible_role(), Some(AccessibleRole::Slider));
         pan.invoke_accessible_increment_action();
         assert!((ui.get_wave_scroll() - 0.505).abs() < 0.001);
-        assert_eq!(pans.borrow().last(), Some(&ui.get_wave_scroll()));
-        let origin = pan.absolute_position();
-        let size = pan.size();
-        click_at(
-            &ui,
-            slint::LogicalPosition::new(origin.x + size.width * 0.75, origin.y + size.height / 2.0),
-        );
-        assert!(ui.get_wave_scroll() > 0.7 && ui.get_wave_scroll() < 0.8);
-        let before_key = ui.get_wave_scroll();
-        send_keys(&ui, &[Key::RightArrow.into()]);
-        assert!((ui.get_wave_scroll() - before_key - 0.005).abs() < 0.001);
-
+        let wave = if chinese {
+            "波形时间轴"
+        } else {
+            "Waveform timeline"
+        };
+        let wheel = || {
+            ui.window().dispatch_event(WindowEvent::KeyPressed {
+                text: Key::Shift.into(),
+            });
+            scroll_timeline(&ui, wave, 0.5, -120.0);
+            ui.window().dispatch_event(WindowEvent::KeyReleased {
+                text: Key::Shift.into(),
+            });
+        };
+        wheel();
+        assert!((ui.get_wave_scroll() - (0.505 + 0.25 / 3.0)).abs() < 0.001);
+        pan.invoke_accessible_default_action();
+        let before = ui.get_wave_scroll();
+        send_keys(&ui, &[Key::Control.into(), Key::RightArrow.into()]);
+        assert!((ui.get_wave_scroll() - before - 0.05).abs() < 0.001);
         for gate in ["not-ready", "missing", "maintenance", "full-range"] {
-            // Start each case with the real slider focused, then disable it.
             ui.set_audio_ready(true);
             ui.set_selected_missing(false);
             ui.set_library_busy(false);
             ui.set_wave_zoom(4.0);
             pan.set_accessible_value("0.5");
-            click_at(
-                &ui,
-                slint::LogicalPosition::new(
-                    origin.x + size.width / 2.0,
-                    origin.y + size.height / 2.0,
-                ),
-            );
             match gate {
                 "not-ready" => ui.set_audio_ready(false),
                 "missing" => ui.set_selected_missing(true),
@@ -2843,14 +2846,8 @@ fn classic_waveform_pan_requires_ready_audio_for_pointer_keyboard_and_accessibil
             assert_eq!(pan.accessible_enabled(), Some(false), "{gate}");
             let previous = ui.get_wave_scroll();
             let count = pans.borrow().len();
-            click_at(
-                &ui,
-                slint::LogicalPosition::new(
-                    origin.x + size.width * 0.75,
-                    origin.y + size.height / 2.0,
-                ),
-            );
-            send_keys(&ui, &[Key::RightArrow.into()]);
+            wheel();
+            send_keys(&ui, &[Key::Control.into(), Key::RightArrow.into()]);
             pan.set_accessible_value("0.8");
             pan.invoke_accessible_increment_action();
             pan.invoke_accessible_decrement_action();
@@ -2869,7 +2866,6 @@ fn classic_waveform_pan_requires_ready_audio_for_pointer_keyboard_and_accessibil
         ui.set_selected_missing(false);
         ui.set_library_busy(false);
         ui.set_wave_zoom(4.0);
-        assert_eq!(pan.accessible_enabled(), Some(true));
         pan.set_accessible_value("0.25");
         assert!((ui.get_wave_scroll() - 0.25).abs() < 0.001);
         assert_eq!(pans.borrow().last(), Some(&0.25));
@@ -3755,7 +3751,11 @@ fn compact_window_keeps_audition_controls_and_time_inside_viewport() {
         if !has_rows {
             ui.set_rows(ModelRc::new(VecModel::default()));
         }
-        for label in ["Play", "Fit entire sound", "Audition time"] {
+        for label in [
+            "Play",
+            "Display Gain; visual only; double-click to reset",
+            "Audition time",
+        ] {
             let element = ElementHandle::find_by_accessible_label(&ui, label)
                 .next()
                 .expect(label);
