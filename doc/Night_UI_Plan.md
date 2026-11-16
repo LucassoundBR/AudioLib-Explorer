@@ -1,5 +1,40 @@
 # Night UI implementation checkpoints
 
+## Delivery completed — 2026-11-16
+
+The pending application delivery below is now complete for source8842947.
+ASIO release build PASS (24m58s), license preflight/package privacy/ZIP checks
+PASS, portable synthetic acceptance PASS. Installed the accepted payload into
+the fixed local_release:908 package-owned files verified,4 copied, CLI1.0.0 and
+isolated installed desktop startup PASS. Working libraries/preferences and the
+normal data-directory selection were preserved. No release/tag was published.
+
+Desktop SHA256:4E7E512E9E3B814FEF0BABD6B2CFE65810898A79A5EC2E24FD531483106B31C3.
+CLI SHA256:45CF19DEC5C33210F59D2F4FB455369F0E07A6CF7E4877AAF0DCC15D9C1D06B1.
+The installed hashes match the accepted package. Evidence remains private under
+.rust-validation/night-ui/{release-resume-fixed,portable-acceptance-20261116,
+local-install-20261116}.log and .rust-validation/local-install/5650eb3aedd94a97b272c414d17a87ae/report.json.
+
+Authorized native UI verification used the same source's preview with an owned
+12s/48kHz/24bit stereo file and volume0: first maximized client3840x2024 at
+DPI144; Pitch dragged to12st then double-click reset0; Rate2.83 then reset1;
+vertical Display Gain21dB matched Peak Display Settings, changing the settings
+to7dB moved the vertical control back, then double-click reset0. Monitoring
+volume remained minus infinity. The preview closed normally. Native controls
+evidence: .rust-validation/night-ui/native-controls-20261116.json. The shipped
+ASIO payload separately passed portable and installed startup acceptance.
+
+The prior34 selected tests and strict desktop Clippy remain applicable: no
+application source/dependency/toolchain change occurred between that accepted
+checkpoint and this build. Existing playback/REAPER protocol and DLL behavior
+retain the 3e35c96/ab6d89c baseline; no new hardware ASIO/listening or REAPER host
+test is claimed from these layout/control checks. Initial ASIO preparation
+failed before compilation because the private wrapper omitted its known local
+ClangDirectory default; corrected to the previous delivery's explicit path.
+
+Reverse is still a separate unfinished feature. Its design/export draft is
+private and has not entered this installed payload.
+
 Authorized scope: fix first maximized startup on 4K, merge REAPER controls into
 the player toolbar, remove the lower zoom strip, add Pitch/Rate sliders and a
 vertical visual Display Gain control. Reverse preview/export is conditional on
