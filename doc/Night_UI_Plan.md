@@ -59,6 +59,37 @@ R, drag export or Send to REAPER, and does not replace the accepted installed
 direction-aware transport/selection and signed playhead interpolation, then UI
 and export/send integration plus affected consumer/IPC checks.
 
+## Reverse preview and integration verification — 2026-11-16
+
+Backwards decoding uses bounded worker-side blocks before resampling/SoundTouch,
+keeping original source coordinates, channel order and range boundaries. The
+transport uses signed progress and direction-aware start/end, seek, Stop and
+repeat. Existing serialized audition settings default Reverse to false.
+Buffered server streams open with Reverse disabled; local originals are required.
+No decoder I/O or allocation moved into the realtime callback.
+
+ASIO audio strict Clippy and35 selected audio tests passed before integration:
+4 Reverse decoder/transport/compatibility tests, the existing audition test,
+10 range tests,6 transport tests and14 seek tests. Evidence:
+.rust-validation/night-ui/reverse-playback.log. These are decoder/worker proofs
+without CPAL streams, listening or hardware latency measurements.
+
+The application adds a Reverse button and R, signed playhead interpolation,
+whole-file/selection reverse export and the existing drag/Send path. Whole-file
+reverse derives its bounds from the locked original header. Changing direction
+retires only the prepared export, retaining selection identity and preview.
+Send waits for the acknowledged direction and newly prepared WAV. REAPER DLL,
+native transport, Undo/Redo and focus protocol are unchanged from the accepted
+3e35c96/ab6d89c baseline; that baseline is not a fresh host test.
+
+Current integration checks are pending. Initial consumer Clippy found one
+redundant String conversion in progress reporting; corrected and resumed in
+.rust-validation/night-ui/reverse-integration-fixed.log. An additional compressed
+decoder comparison covers backwards MP3/Ogg/FLAC block boundaries. Final source
+checks, rendered/native UI acceptance, release payload acceptance and installation
+must pass before claiming delivery of Reverse; local_release still contains
+the accepted8842947 UI build.
+
 Authorized scope: fix first maximized startup on 4K, merge REAPER controls into
 the player toolbar, remove the lower zoom strip, add Pitch/Rate sliders and a
 vertical visual Display Gain control. Reverse preview/export is conditional on

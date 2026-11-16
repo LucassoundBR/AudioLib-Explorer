@@ -15,6 +15,8 @@ pub struct AuditionSettings {
     pub rate: f32,
     pub mono: bool,
     pub loop_enabled: bool,
+    /// Preview backwards in original source coordinates; channels retain their order.
+    pub reverse: bool,
 }
 impl Default for AuditionSettings {
     fn default() -> Self {
@@ -23,6 +25,7 @@ impl Default for AuditionSettings {
             rate: 1.0,
             mono: false,
             loop_enabled: false,
+            reverse: false,
         }
     }
 }
@@ -60,7 +63,11 @@ impl AuditionDecoder {
         settings: AuditionSettings,
     ) -> Result<Self> {
         let end_frame = decoder.info.metadata.frames;
-        Self::new_bounded(decoder, output_rate, start_frame, end_frame, pair, settings)
+        if settings.reverse {
+            Self::new_bounded(decoder, output_rate, 0, start_frame, pair, settings)
+        } else {
+            Self::new_bounded(decoder, output_rate, start_frame, end_frame, pair, settings)
+        }
     }
     /// Only selected source frames reach the resampler and SoundTouch input.
     pub fn new_bounded(
@@ -96,7 +103,15 @@ impl AuditionDecoder {
             None
         };
         Ok(Self {
-            source: if end_frame == metadata.frames {
+            source: if settings.reverse {
+                ResampledDecoder::new_directional(
+                    decoder,
+                    output_rate,
+                    start_frame,
+                    end_frame,
+                    true,
+                )?
+            } else if end_frame == metadata.frames {
                 ResampledDecoder::new(decoder, output_rate, start_frame)?
             } else {
                 ResampledDecoder::new_bounded(decoder, output_rate, start_frame, end_frame)?

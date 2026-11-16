@@ -30,7 +30,7 @@ pub use list_waveform::{
     LIST_WAVEFORM_ZOOM_LEVEL, list_samples_per_pixel, list_waveform_with_cancel,
     merge_list_channels, quantize_list_peak,
 };
-pub use slice::{export_audio_slice, export_reversed_audio_slice};
+pub use slice::{export_audio_slice, export_reversed_audio_file, export_reversed_audio_slice};
 pub use source::{
     ByteSource, SourceBuffer, SourceOpener, is_stream_source, register_buffered_stream_source,
     register_buffered_stream_source_with_metadata, register_stream_source,

@@ -20,7 +20,19 @@ pub fn export_reversed_audio_slice(
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(u64, u64),
 ) -> Result<()> {
-    export_audio_slice_ordered(source, destination, range, true, cancel, progress)
+    export_audio_slice_ordered(source, destination, Some(range), true, cancel, progress)
+}
+
+/// Reverse the entire original, deriving its frame range from the locked source
+/// header so a separate probe cannot race a source replacement. Ownership,
+/// precision, cancellation and worker-thread rules match reversed slice export.
+pub fn export_reversed_audio_file(
+    source: &Path,
+    destination: &Path,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(u64, u64),
+) -> Result<()> {
+    export_audio_slice_ordered(source, destination, None, true, cancel, progress)
 }
 
 struct Spool {
@@ -78,11 +90,11 @@ pub(super) fn export_via_pcm(
     export_audio_slice_ordered(
         &spool.file,
         destination,
-        AudioFrameRange {
+        Some(AudioFrameRange {
             start_frame: 0,
             end_frame: range.end_frame - range.start_frame,
             sample_rate: range.sample_rate,
-        },
+        }),
         true,
         cancel,
         progress,

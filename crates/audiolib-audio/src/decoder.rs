@@ -553,6 +553,8 @@ pub(crate) struct ResampledDecoder {
     /// Source frames consumed per output frame.
     input_per_output: f64,
     input_remaining: u64,
+    /// Exclusive original frame cursor; all backwards seeks/decoding run on the worker.
+    reverse_cursor: Option<u64>,
 }
 impl ResampledDecoder {
     pub fn is_finished(&self) -> bool {
@@ -575,13 +577,28 @@ impl ResampledDecoder {
     }
     /// Treat the exclusive source end as EOF before resampling, including its lookahead.
     pub fn new_bounded(
-        mut decoder: Decoder,
+        decoder: Decoder,
         output_rate: u32,
         start_frame: u64,
         end_frame: u64,
     ) -> Result<Self> {
+        Self::new_directional(decoder, output_rate, start_frame, end_frame, false)
+    }
+    /// Reverse whole frames before resampling, with bounded blocks and original coordinates.
+    pub fn new_directional(
+        mut decoder: Decoder,
+        output_rate: u32,
+        start_frame: u64,
+        end_frame: u64,
+        reverse: bool,
+    ) -> Result<Self> {
         if output_rate == 0 || start_frame > end_frame || end_frame > decoder.info.metadata.frames {
             return Err(Error::Validation("Invalid bounded decoder range".into()));
+        }
+        if reverse && decoder.buffer.is_some() {
+            return Err(Error::Validation(
+                "Reverse preview requires a local original, not a buffered stream".into(),
+            ));
         }
         decoder.seek(start_frame)?;
         let metadata = &decoder.info.metadata;
@@ -616,28 +633,60 @@ impl ResampledDecoder {
             channels,
             input_per_output,
             input_remaining,
+            reverse_cursor: reverse.then_some(end_frame),
         })
+    }
+    fn read_input(&mut self, maximum: usize) -> Result<Vec<f32>> {
+        let frames = self.input_remaining.min(maximum as u64) as usize;
+        let Some(cursor) = self.reverse_cursor else {
+            return self.decoder.read(frames);
+        };
+        if frames == 0 {
+            return Ok(Vec::new());
+        }
+        let start = cursor
+            .checked_sub(frames as u64)
+            .ok_or_else(|| audio_error("Reverse frame cursor underflow"))?;
+        self.decoder.seek(start)?;
+        let mut samples = self.decoder.read(frames)?;
+        if samples.len() != frames * self.channels {
+            return Err(audio_error(
+                "Source ended before its declared reverse frame range",
+            ));
+        }
+        for left in 0..frames / 2 {
+            let right = frames - left - 1;
+            for channel in 0..self.channels {
+                samples.swap(
+                    left * self.channels + channel,
+                    right * self.channels + channel,
+                );
+            }
+        }
+        self.reverse_cursor = Some(start);
+        Ok(samples)
     }
     pub fn next(&mut self) -> Result<Vec<f32>> {
         if self.output_remaining == 0 {
             return Ok(Vec::new());
         }
-        let Some(resampler) = &mut self.resampler else {
-            let samples = self.decoder.read(self.input_remaining.min(2048) as usize)?;
+        if self.resampler.is_none() {
+            let samples = self.read_input(2048)?;
             self.input_remaining -= (samples.len() / self.channels) as u64;
             self.output_remaining = self
                 .output_remaining
                 .saturating_sub((samples.len() / self.channels) as u64);
             return Ok(samples);
-        };
-        let frames = resampler.input_frames_next();
-        let mut input = self
-            .decoder
-            .read(self.input_remaining.min(frames as u64) as usize)?;
+        }
+        let frames = self.resampler.as_ref().unwrap().input_frames_next();
+        let mut input = self.read_input(frames)?;
         self.input_remaining -= (input.len() / self.channels) as u64;
         input.resize(frames * self.channels, 0.0);
         let input = InterleavedSlice::new(&input, self.channels, frames).map_err(audio_error)?;
-        let mut output = resampler
+        let mut output = self
+            .resampler
+            .as_mut()
+            .unwrap()
             .process(&input, None)
             .map_err(audio_error)?
             .take_data();

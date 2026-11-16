@@ -771,8 +771,8 @@ fn reverse_one_frame_and_double_reverse_keep_exact_pcm() {
     let second = temp.path().join("second.wav");
     let single = temp.path().join("single.wav");
     std::fs::write(&source, wave(layout, 17, &bytes)).unwrap();
+    export_reversed_audio_file(&source, &first, &AtomicBool::new(false), &mut |_, _| {}).unwrap();
     for (input, output, selection) in [
-        (&source, &first, range(0, 17, 48000)),
         (&first, &second, range(0, 17, 48000)),
         (&source, &single, range(7, 8, 48000)),
     ] {

@@ -227,13 +227,13 @@ pub fn export_audio_slice(
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(u64, u64),
 ) -> Result<()> {
-    export_audio_slice_ordered(source, destination, range, false, cancel, progress)
+    export_audio_slice_ordered(source, destination, Some(range), false, cancel, progress)
 }
 
 fn export_audio_slice_ordered(
     source: &Path,
     destination: &Path,
-    range: AudioFrameRange,
+    range: Option<AudioFrameRange>,
     reverse: bool,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(u64, u64),
@@ -246,6 +246,11 @@ fn export_audio_slice_ordered(
         return Err(invalid("Slice source is not a stable regular file"));
     }
     let info = read_info_reader(&mut file, before.len(), false, false)?;
+    let range = range.unwrap_or(AudioFrameRange {
+        start_frame: 0,
+        end_frame: info.metadata.frames,
+        sample_rate: info.metadata.sample_rate,
+    });
     if range.sample_rate != info.metadata.sample_rate
         || range.start_frame >= range.end_frame
         || range.end_frame > info.metadata.frames
@@ -549,4 +554,4 @@ mod tests;
 
 #[path = "reverse_export.rs"]
 mod reverse_export;
-pub use reverse_export::export_reversed_audio_slice;
+pub use reverse_export::{export_reversed_audio_file, export_reversed_audio_slice};
