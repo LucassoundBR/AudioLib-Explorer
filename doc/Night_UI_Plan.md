@@ -1,5 +1,47 @@
 # Night UI implementation checkpoints
 
+## Toolbar refinement development checkpoint — 2026-11-16
+
+User reordered the refinement plan: toolbar first, then numeric units/ruler,
+then mirrored Reverse presentation, and upstream integration last before final
+delivery. Upstream refs were inspected at bbd5df2/v1.0.2; none were merged.
+
+Classic Send is now an export icon with name/S tooltip and unchanged accessible
+name, send callback, busy/modal guards and Auto-Focus checkbox. Studio's separate
+Send row also uses the icon. Reverse shows its name without R on both faces;
+the explanatory hover retains R. Connect was removed from both bars; Settings
+now has REAPER… invoking the existing setup callback, gated by platform/busy/
+background state and the existing parent menu readiness. The processing engine,
+REAPER transport/DLL and selection coordinates were not changed.
+
+Formatting and strict desktop all-target ASIO Clippy PASS. Seven selected tests
+PASS: five audition-toolbar interactions (including visible Send, Auto-Focus
+and output controls at1920 and1440 logical widths), one S/search/busy/modal
+regression across both presenters and one explicitly invoked offscreen image
+export. Classic and Studio normal renders were inspected: icon-only Send,
+name-only Reverse and no Connect overflow. Evidence:
+.rust-validation/night-ui/toolbar-cleanup-final.log and toolbar-cleanup-snapshots/.
+The first two checks failed during UI generation on the new Studio tooltip's
+styled-text/interpolation syntax; the final run corrected it to an interpolated
+label property. Failed logs are retained, not reported as passing evidence.
+
+This is a validated source checkpoint, NOT an installed delivery. Native hover
+and Settings-menu acceptance remain for the final GUI window, alongside the
+release/package/portable/install sequence. local_release and the accepted Reverse
+payload remain unchanged. Prior audio/export/native REAPER and data-safety
+baselines remain applicable to their unchanged implementations; unrelated
+subsystem tests were excluded. No native GUI, device output or user-data writes
+were performed. Next: put st/× inside the numeric fields and recover the ruler
+height for the Waveform; preserve existing numeric parsing/reset behavior.
+
+Final cache maintenance PASS:40GiB budget met. Logical estimates46,299,661,920
+bytes before,43,372,743,013 removed,2,926,918,907 retained. Both owned preview
+profile directories were pruned as coarse budget candidates; subsequent preview
+checks may require cold compilation. Release outputs, installed application,
+SDK/toolchain, validation evidence and working data/audio were retained. Evidence:
+.rust-validation/night-ui/toolbar-cache-maintenance.log. These are logical byte
+estimates, not a physical free-space measurement.
+
 ## Reverse installed and accepted — 2026-11-16
 
 Reused the exact cb56405 ASIO package above, without compilation. Runtime

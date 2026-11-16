@@ -1254,7 +1254,7 @@ component ClassicAuditionPanel inherits Rectangle {
                 clicked => { root.repeat = !root.repeat; root.transform(root.pitch-text, root.rate-text, root.mono, root.repeat); }
             }
             ClassicTool {
-                width: 86px * Theme.ui-scale; symbol: root.chinese ? "反向 · R" : "Reverse · R";
+                width: 76px * Theme.ui-scale; symbol: root.chinese ? "反向" : "Reverse";
                 label: root.chinese ? "反向音频" : "Reverse audio"; active: root.reverse; checkable: true;
                 enabled: root.transport-ready && root.reverse-supported && !root.selection-preparing && !root.selection-gesture;
                 hint: !root.reverse-supported ? (root.chinese ? "反向试听需要本地原素材" : "Reverse preview requires a local original") : (root.chinese ? "向后试听并反向导出 · R" : "Preview backwards and export reversed · R");
@@ -1289,9 +1289,9 @@ component ClassicAuditionPanel inherits Rectangle {
             ClassicTool { width: 54px * Theme.ui-scale; symbol: root.chinese ? "单声道" : "Mono"; label: root.chinese ? "单声道监听" : "Mono monitoring"; active: root.mono; checkable: true; hint: root.mono ? (root.chinese ? "单声道监听已开启，点击关闭" : "Mono monitoring is on; click to turn off") : (root.chinese ? "单声道监听已关闭，点击开启" : "Mono monitoring is off; click to turn on"); clicked => { root.mono = !root.mono; root.transform(root.pitch-text, root.rate-text, root.mono, root.repeat); } }
             if root.reaper-supported: Rectangle { width: 1px; background: Theme.player-border; }
             if root.reaper-supported: ClassicTool {
-                width: 146px * Theme.ui-scale;
-                symbol: root.reaper-busy ? (root.chinese ? "正在发送…" : "Sending…") : (root.chinese ? "发送到 REAPER · S" : "Send to REAPER · S");
+                icon: @image-url("icons/export.svg");
                 label: root.chinese ? "发送到 REAPER" : "Send to REAPER";
+                hint: root.reaper-busy ? (root.chinese ? "正在发送… · S" : "Sending… · S") : "S";
                 enabled: root.reaper-ready && !root.reaper-busy && !root.reaper-blocked;
                 clicked => { root.reaper-send(); }
             }
@@ -1302,12 +1302,6 @@ component ClassicAuditionPanel inherits Rectangle {
                 enabled: !root.reaper-busy && !root.reaper-blocked;
             }
             Caption { horizontal-stretch: 1; min-width: 0px; text: root.output; overflow: elide; horizontal-alignment: right; font-size: Theme.font(9); }
-            if root.reaper-supported: ClassicTool {
-                width: 126px * Theme.ui-scale; symbol: root.chinese ? "连接 REAPER…" : "Connect REAPER…";
-                label: root.chinese ? "连接 REAPER" : "Connect REAPER";
-                enabled: !root.reaper-busy && !root.reaper-blocked;
-                clicked => { root.reaper-setup(); }
-            }
             ClassicTool { icon: @image-url("icons/peaks.svg"); label: root.chinese ? "波形显示设置" : "Peak display settings"; tip-align: 1; clicked => { root.peaks(); } }
             ClassicTool { icon: @image-url("icons/settings.svg"); label: root.chinese ? "音频输出" : "Audio output"; tip-align: 1; clicked => { root.output-settings(); } }
         }
@@ -1742,7 +1736,7 @@ component WorkbenchAuditionPanel inherits Rectangle {
                 Tool { width: 24px * Theme.ui-scale; height: 24px * Theme.ui-scale; subtle: true; icon-size: 16px * Theme.ui-scale; icon: @image-url("icons/reset.svg"); label: root.chinese ? "重置变调与速度" : "Reset Pitch / Rate"; enabled: pitch-field.modified || rate-field.modified; clicked => { root.pitch-text = "0.00"; root.rate-text = "1.00"; root.transform(root.pitch-text, root.rate-text, root.mono, root.repeat); } }
                 Tool {
                     width: 86px * Theme.ui-scale; height: 24px * Theme.ui-scale; subtle: true;
-                    symbol: root.chinese ? "反向 · R" : "Reverse · R"; symbol-size: Theme.font(10);
+                    symbol: root.chinese ? "反向" : "Reverse"; symbol-size: Theme.font(10);
                     label: root.chinese ? "反向音频" : "Reverse audio"; active: root.reverse;
                     enabled: root.ready && !root.missing && !root.busy && root.reverse-supported && !root.selection-preparing && !root.selection-gesture;
                     hint: root.chinese ? "向后试听并反向导出 · R" : "Preview backwards and export reversed · R";

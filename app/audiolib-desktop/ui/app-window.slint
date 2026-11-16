@@ -930,16 +930,23 @@ component SourceFooter inherits Rectangle {
 }
 component ReaperSendBar inherits HorizontalLayout {
     in property <bool> chinese;
+    property <string> send-label: root.chinese ? "发送到 REAPER" : "Send to REAPER";
     in property <bool> ready;
     in property <bool> busy;
     in property <bool> blocked;
     in-out property <bool> auto-focus;
     callback send(); callback setup();
     spacing: 8px * Theme.ui-scale;
-    Action { width: 160px * Theme.ui-scale; label: root.busy ? (root.chinese ? "正在发送…" : "Sending…") : (root.chinese ? "发送到 REAPER · S" : "Send to REAPER · S"); enabled: root.ready && !root.busy && !root.blocked; clicked => { root.send(); } }
+    Action {
+        width: 36px * Theme.ui-scale;
+        action-label: root.send-label;
+        enabled: root.ready && !root.busy && !root.blocked;
+        Image { source: @image-url("icons/export.svg"); width: 19px * Theme.ui-scale; height: self.width; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; colorize: Theme.ink; accessible-role: none; }
+        Tooltip { text: @markdown("\{root.send-label} · S"); }
+        clicked => { root.send(); }
+    }
     CheckBox { width: 170px * Theme.ui-scale; text: root.chinese ? "发送后切换到 REAPER" : "Focus REAPER after send"; checked <=> root.auto-focus; enabled: !root.busy && !root.blocked; }
     Rectangle { horizontal-stretch: 1; }
-    Action { width: 135px * Theme.ui-scale; label: root.chinese ? "连接 REAPER…" : "Connect REAPER…"; enabled: !root.busy && !root.blocked; clicked => { root.setup(); } }
 }
 
 export component AppWindow inherits Window {
@@ -2806,6 +2813,7 @@ export component AppWindow inherits Window {
             MenuItem { title: root.chinese ? "搜索与任务…" : "Search and tasks…"; activated => { root.open-global-settings(2); } }
             MenuItem { title: root.chinese ? "AI智能搜索…" : "AI Search…"; activated => { root.ai-action(22,0); } }
             MenuItem { title: root.chinese ? "播放与音频…" : "Audio and playback…"; activated => { root.open-global-settings(0); } }
+            MenuItem { title: root.chinese ? "连接 REAPER…" : "REAPER…"; enabled: root.reaper-supported && !root.reaper-busy && !root.background-blocked; activated => { root.reaper-setup-requested(); } }
             MenuItem { title: root.chinese ? "服务器与同步…" : "Server and sync…"; activated => { root.open-global-settings(3); } }
             MenuItem { title: root.chinese ? "本机缓存…" : "Local caches…"; activated => { root.open-global-settings(4); } }
         }

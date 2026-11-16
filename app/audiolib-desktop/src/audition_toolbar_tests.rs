@@ -112,12 +112,19 @@ fn reaper_controls_share_the_player_row_at_fhd_and_keep_busy_guards() {
     let observed = sends.clone();
     ui.on_reaper_send_requested(move || observed.set(observed.get() + 1));
     let send = control(&ui, "Send to REAPER");
-    let connect = control(&ui, "Connect REAPER");
     let pitch = control(&ui, "Pitch semitones; double-click to reset");
-    for button in [&send, &connect] {
-        let pos = button.absolute_position();
-        assert!(pos.x >= 0.0 && pos.x + button.size().width <= 1920.0);
-        assert!((pos.y - pitch.absolute_position().y).abs() < 32.0);
+    for width in [1920.0, 1440.0] {
+        ui.window().set_size(slint::LogicalSize::new(width, 1000.0));
+        settle();
+        for button in [
+            &send,
+            &control(&ui, "Audio output"),
+            &control(&ui, "Focus REAPER after send"),
+        ] {
+            let pos = button.absolute_position();
+            assert!(pos.x >= 0.0 && pos.x + button.size().width <= width);
+            assert!((pos.y - pitch.absolute_position().y).abs() < 32.0);
+        }
     }
     send.mock_single_click(PointerEventButton::Left);
     settle();
