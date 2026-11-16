@@ -227,6 +227,17 @@ pub fn export_audio_slice(
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(u64, u64),
 ) -> Result<()> {
+    export_audio_slice_ordered(source, destination, range, false, cancel, progress)
+}
+
+fn export_audio_slice_ordered(
+    source: &Path,
+    destination: &Path,
+    range: AudioFrameRange,
+    reverse: bool,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(u64, u64),
+) -> Result<()> {
     cancelled(cancel)?;
     let source = std::fs::canonicalize(source)?;
     let mut file = open_original(&source)?;
@@ -242,6 +253,24 @@ pub fn export_audio_slice(
         return Err(Error::Validation(
             "Slice range is outside the original source frames".into(),
         ));
+    }
+    if reverse && info.pcm_layout.is_none() {
+        reverse_export::export_via_pcm(&source, destination, range, cancel, progress)?;
+        // Only acquire cleanup ownership after create-new export succeeded.
+        let mut partial = PartialOutput {
+            path: destination,
+            committed: false,
+        };
+        cancelled(cancel)?;
+        if !same_source(&before, &file.metadata()?)
+            || !same_source(&before, &std::fs::metadata(&source)?)
+        {
+            return Err(invalid(
+                "Original audio changed during reversed slice export",
+            ));
+        }
+        partial.committed = true;
+        return Ok(());
     }
     let format = OutputFormat::for_source(&info)?;
     let frames = range.end_frame - range.start_frame;
@@ -265,7 +294,7 @@ pub fn export_audio_slice(
             &mut output,
             &info,
             format,
-            range,
+            PcmRange { range, reverse },
             cancel,
             progress,
         )?;
@@ -305,15 +334,21 @@ pub fn export_audio_slice(
     Ok(())
 }
 
+struct PcmRange {
+    range: AudioFrameRange,
+    reverse: bool,
+}
+
 fn copy_pcm(
     file: &mut File,
     output: &mut impl Write,
     info: &WavInfo,
     format: OutputFormat,
-    range: AudioFrameRange,
+    plan: PcmRange,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(u64, u64),
 ) -> Result<()> {
+    let PcmRange { range, reverse } = plan;
     let layout = info.pcm_layout.expect("PCM export was selected");
     let align = usize::from(info.block_align);
     let width = usize::from(layout.bytes_per_sample);
@@ -334,8 +369,18 @@ fn copy_pcm(
     while done < frames {
         cancelled(cancel)?;
         let count = (frames - done).min(batch as u64) as usize;
+        if reverse {
+            let frame = range.end_frame - done - count as u64;
+            let offset = frame
+                .checked_mul(align as u64)
+                .and_then(|offset| info.data_offset.checked_add(offset))
+                .ok_or_else(|| invalid("Reversed PCM byte offset overflow"))?;
+            file.seek(SeekFrom::Start(offset))?;
+        }
         file.read_exact(&mut bytes[..count * align])?;
-        for frame in bytes[..count * align].chunks_exact_mut(align) {
+        for index in 0..count {
+            let index = if reverse { count - 1 - index } else { index };
+            let frame = &mut bytes[index * align..(index + 1) * align];
             let samples = &mut frame[..output_align];
             if matches!(layout.endian, ByteOrder::Big) {
                 for sample in samples.chunks_exact_mut(width) {
@@ -501,3 +546,7 @@ fn decode_flac(
 #[cfg(test)]
 #[path = "slice_tests.rs"]
 mod tests;
+
+#[path = "reverse_export.rs"]
+mod reverse_export;
+pub use reverse_export::export_reversed_audio_slice;

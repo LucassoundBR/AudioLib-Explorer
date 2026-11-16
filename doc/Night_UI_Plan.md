@@ -35,6 +35,30 @@ ClangDirectory default; corrected to the previous delivery's explicit path.
 Reverse is still a separate unfinished feature. Its design/export draft is
 private and has not entered this installed payload.
 
+## Reverse export development checkpoint — 2026-11-16
+
+Added export_reversed_audio_slice for original file/range frames. PCM/float/AIFF
+copies backwards in bounded256KiB blocks by complete frames, preserving channel
+order, precision and rate. Compressed formats use the existing precise forward
+decoder in a uniquely created owned spool, then reverse its PCM; FLAC integer
+precision does not pass through f32. Source handles/version checks, create-new
+destinations, cancellation and owned-output cleanup remain enforced.
+
+Formatting and strict audio Clippy PASS;18 slice/export tests PASS (13 existing,
+5 new). New checks cover channel/precision retention across block boundaries,
+16/24/32-bit FLAC, PCM and compressed cancellation, existing destinations, spool
+cleanup, one-frame/odd padding and double reversal. Evidence:
+.rust-validation/night-ui/reverse-export-final.log. Headless preview configuration
+was deliberate: export/file I/O changed; audio output, ASIO wiring, transport and
+the realtime callback did not. Existing playback/backend and unchanged consumer
+baselines remain applicable at this checkpoint; no dependency changed.
+
+This is a development API checkpoint only. It is not yet connected to preview,
+R, drag export or Send to REAPER, and does not replace the accepted installed
+8842947 application. Next: backwards preview with original source coordinates,
+direction-aware transport/selection and signed playhead interpolation, then UI
+and export/send integration plus affected consumer/IPC checks.
+
 Authorized scope: fix first maximized startup on 4K, merge REAPER controls into
 the player toolbar, remove the lower zoom strip, add Pitch/Rate sliders and a
 vertical visual Display Gain control. Reverse preview/export is conditional on
