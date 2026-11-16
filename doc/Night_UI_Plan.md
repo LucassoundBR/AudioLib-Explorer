@@ -1,5 +1,41 @@
 # Night UI implementation checkpoints
 
+## Reverse installed and accepted — 2026-11-16
+
+Reused the exact cb56405 ASIO package above, without compilation. Runtime
+playback/IPC acceptance and portable acceptance PASS with isolated synthetic
+fixtures. Evidence: .rust-validation/night-ui/reverse-runtime-ipc.log and
+reverse-portable.log. Existing scoped source/DSP/export/Send tests remain
+applicable because no application source, feature or toolchain changed.
+
+Authorized native acceptance PASS: R enabled Reverse and moved the whole-file
+cursor to12s; muted playback moved backwards (observed3.613s). Clicking Reverse
+disabled it. A mouse-selected region retained its interval after R, prepared
+the reversed WAV, and Space responded. Confirmed engine status recorded
+reverse=true, volume=0, no error, zero underruns, range159482..329143 at48kHz,
+Ended at3.3225416666666665s, exactly its first source frame. Reverse=true and
+volume0 persisted after normal close. Evidence: reverse-native-status.json,
+reverse-native-visible.log and the owned baseline/settings.json. No listening,
+latency measurement or fresh native REAPER/Auto-Focus test is claimed; native
+host/DLL behavior is unchanged and retains its prior accepted baseline.
+
+The first owned fixture launched outside the tool's visible desktop. After
+normal close was unavailable, only that identity-checked disposable fixture
+process was terminated, then relaunched on the visible desktop. The working
+AudioLib closed normally before testing; the visible fixture closed normally.
+An initial non-elevated IPC status probe was denied; the matching-context probe
+succeeded and supplied the confirmed state above.
+
+Installation PASS:908 package-owned files verified,5 copied, CLI1.0.0 and isolated
+installed startup passed at fixed local_release. Installed hashes match the
+candidate hashes below. Receipt:
+.rust-validation/local-install/538698fd717b4f348a48a0d731132ae5/report.json.
+Working libraries, Metadata, preferences and normal data-directory selection
+were preserved. No Rust compilation/tests were repeated; previous budgeted
+cache maintenance remains valid and was not rescanned for this acceptance-only
+step. No release/tag/merge was published. Next: normal user audition of the
+installed Reverse; changes require new scoped checks, not a routine rebuild.
+
 ## Reverse candidate prepared; native acceptance deferred — 2026-11-16
 
 Source cb56405 (audio checkpoint bb84a12) passed the scoped checks recorded below.
