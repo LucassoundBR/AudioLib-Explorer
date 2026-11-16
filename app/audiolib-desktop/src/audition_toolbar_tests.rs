@@ -39,6 +39,65 @@ fn player() -> AppWindow {
 }
 
 #[test]
+fn numeric_units_preserve_submission_and_waveform_reclaims_ruler_space() {
+    i_slint_backend_testing::init_no_event_loop();
+    let ui = player();
+    let wave = control(&ui, "Waveform timeline");
+    let clock = control(&ui, "Audition time");
+    let gap = clock.absolute_position().y - wave.absolute_position().y - wave.size().height;
+    assert!(
+        (0.0..16.0).contains(&gap),
+        "Recovered ruler space must belong to the plot: {gap}"
+    );
+    let calls = Rc::new(RefCell::new(Vec::new()));
+    let observed = calls.clone();
+    ui.on_transform_requested(move |p, r, _, _| observed.borrow_mut().push((p, r)));
+    ui.on_reaper_send_requested(|| panic!("Typing in a numeric field must not send audio"));
+    for modern in [false, true] {
+        ui.global::<Theme>().set_modern_style(modern);
+        ui.global::<Theme>().set_modern_player(modern);
+        settle();
+        for (label, value) in [
+            ("Pitch semitones, applied on Enter or focus loss", "-24.00"),
+            (
+                "Pitch-preserving speed, applied on Enter or focus loss",
+                "1.37",
+            ),
+        ] {
+            let input = control(&ui, label);
+            input.mock_single_click(PointerEventButton::Left);
+            for text in ["r", "s"] {
+                ui.window()
+                    .dispatch_event(WindowEvent::KeyPressed { text: text.into() });
+                ui.window()
+                    .dispatch_event(WindowEvent::KeyReleased { text: text.into() });
+            }
+            assert!(!ui.get_audition_reverse());
+            input.set_accessible_value(value);
+            ui.window().dispatch_event(WindowEvent::KeyPressed {
+                text: Key::Return.into(),
+            });
+            ui.window().dispatch_event(WindowEvent::KeyReleased {
+                text: Key::Return.into(),
+            });
+            settle();
+            let (pitch, rate) = calls.borrow().last().unwrap().clone();
+            assert!(pitch.as_str().parse::<f32>().is_ok());
+            assert!(rate.as_str().parse::<f32>().is_ok());
+            assert_eq!(
+                if label.starts_with("Pitch semitones") {
+                    pitch
+                } else {
+                    rate
+                },
+                value
+            );
+        }
+    }
+    ui.hide().unwrap();
+}
+
+#[test]
 fn transform_sliders_and_typed_values_stay_synchronized_and_obey_readiness() {
     i_slint_backend_testing::init_no_event_loop();
     let ui = player();

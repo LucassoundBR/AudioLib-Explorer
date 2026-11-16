@@ -613,7 +613,7 @@ fn legacy_seek_freezes_its_transport_duration_limit() {
 }
 
 #[test]
-fn narrow_selection_has_a_separate_drag_grip_without_covering_plot_or_ruler() {
+fn narrow_selection_has_a_separate_drag_grip_without_covering_plot_or_clock() {
     i_slint_backend_testing::init_no_event_loop();
     for modern in [false, true] {
         let ui = window(modern);
@@ -637,7 +637,7 @@ fn narrow_selection_has_a_separate_drag_grip_without_covering_plot_or_ruler() {
             origin.y + size.height <= plot_origin.y || origin.y >= plot_origin.y + plot_size.height,
             "modern={modern}, grip={origin:?}+{size:?}, plot={plot_origin:?}+{plot_size:?}"
         );
-        let ruler = ElementHandle::find_by_accessible_label(&ui, "Waveform time ruler")
+        let ruler = ElementHandle::find_by_accessible_label(&ui, "Audition time")
             .next()
             .unwrap();
         assert!(

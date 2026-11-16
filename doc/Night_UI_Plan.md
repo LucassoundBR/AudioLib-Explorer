@@ -1,5 +1,45 @@
 # Night UI implementation checkpoints
 
+## Numeric units and ruler removal checkpoint — 2026-11-16
+
+Stage3 adds an audition-local UnitNumberInput: the editable TextInput holds only
+the numeric string, with a separate painted st/× suffix inside its border. Both
+Classic and Studio use it; Classic keeps Enter/focus-loss submission and Studio
+keeps its existing stepped NumberField wrapper. The Studio Pitch field was
+widened to match Classic's76px. No shared theme input, audio DSP, persisted
+setting format or REAPER transport changed.
+
+Removed the Classic24px and Studio20px ruler rows; flexible plot height absorbs
+the space. Kept current/duration counters, selection feedback, direct Waveform
+seek/zoom/pan and Studio overview. Removed the obsolete Classic ruler-label
+formatter. Replaced the obsolete ruler-label UI assertion with recovered-space
+and numeric-input coverage, retargeted zoom checks to the surviving Waveform,
+and checked drag-grip separation against the retained clock.
+
+Formatting and desktop all-target ASIO strict Clippy passed in stage3.log.
+After the final width-only adjustment and additional tests, stage3-final.log
+records27 passing tests:6 toolbar/input (including numeric-only Enter submission,
+typing r/s without global actions in both presenters and plot/clock spacing),
+18 selection/drag/playhead tests,2 wheel/pending-render anchor tests and1 explicit
+offscreen image export. Classic and Studio normal renders inspected: units
+inside fields, no ruler, larger Waveform and intact counters/selection strip.
+The final width adjustment is covered by this compiled interaction/render pass;
+unrelated Clippy targets and audio/data-safety suites were not repeated for it.
+Evidence: .rust-validation/night-ui/stage3{,-final}.log and stage3-snapshots/.
+
+This remains a source checkpoint, not an installed application delivery. No
+native windows/input/audio or working data were used. Release/package/startup/
+installation acceptance remains for the combined delivery. Existing unchanged
+audio/export/REAPER/database baselines retain their previous recorded scope.
+Next: mirrored Reverse display with forward visual progress and correct mapping
+of selection/seek/export; update the original repository last before delivery.
+Suggested model for that mapping work: Sol6.1 High.
+
+Final cache maintenance PASS in Incremental mode:18,700,325,809 logical bytes
+retained (about17.42GiB), zero removed,40GiB budget met. Compiled dependencies,
+release outputs, SDKs, installation and data/audio/evidence retained. Evidence:
+.rust-validation/night-ui/stage3-cache.log. Quota snapshot38% short /59% weekly.
+
 ## Toolbar refinement development checkpoint — 2026-11-16
 
 User reordered the refinement plan: toolbar first, then numeric units/ruler,

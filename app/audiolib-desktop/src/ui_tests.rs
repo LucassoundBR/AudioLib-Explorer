@@ -2874,75 +2874,6 @@ fn classic_waveform_pan_requires_ready_audio_for_wheel_keyboard_and_accessibilit
 }
 
 #[test]
-fn classic_waveform_ruler_carries_minutes_and_distinguishes_short_ranges() {
-    i_slint_backend_testing::init_no_event_loop();
-    let ui = AppWindow::new().unwrap();
-    ui.window().set_size(slint::LogicalSize::new(1440.0, 900.0));
-    ui.set_audio_ready(true);
-    ui.set_play_duration(120.0);
-    ui.show().unwrap();
-    for (start, end, decimals, precision) in [
-        (59.96_f32, 61.96_f32, 1, 0.1_f64),
-        (0.99, 1.04, 3, 0.001),
-        (59.996, 60.496, 2, 0.01),
-    ] {
-        ui.set_view_start(start);
-        ui.set_view_end(end);
-        let ruler = ElementHandle::find_by_accessible_label(&ui, "Waveform time ruler")
-            .next()
-            .expect("classic Waveform ruler");
-        let mut labels = ruler
-            .query_descendants()
-            .match_inherits("Text")
-            .find_all()
-            .into_iter()
-            .filter_map(|element| {
-                let text = element.accessible_label()?;
-                let (minutes, seconds) = text.split_once(':')?;
-                let minutes = minutes.parse::<u32>().expect("ruler minutes");
-                let seconds = seconds.parse::<f64>().expect("ruler seconds");
-                let decimals = text
-                    .split_once('.')
-                    .map_or(0, |(_, fraction)| fraction.len());
-                Some((element.absolute_position().x, minutes, seconds, decimals))
-            })
-            .collect::<Vec<_>>();
-        labels.sort_by(|left, right| left.0.total_cmp(&right.0));
-        assert_eq!(
-            labels.len(),
-            11,
-            "all visible ruler labels must be readable"
-        );
-        for (index, (_, minutes, seconds, digits)) in labels.iter().enumerate() {
-            assert!(
-                (0.0..60.0).contains(seconds),
-                "seconds must carry into minutes"
-            );
-            assert_eq!(*digits, decimals, "precision must follow the visible range");
-            let actual = f64::from(*minutes) * 60.0 + seconds;
-            let expected = f64::from(start) + f64::from(end - start) * index as f64 / 10.0;
-            assert!(
-                (actual - expected).abs() <= precision * 0.501,
-                "tick {index}: {actual} vs {expected}"
-            );
-        }
-        if start > 59.9 {
-            assert_eq!(
-                labels[0].1, 1,
-                "rounding must carry the first tick into the next minute"
-            );
-            assert_eq!(labels[0].2, 0.0);
-        }
-        for pair in labels.windows(2) {
-            let left = f64::from(pair[0].1) * 60.0 + pair[0].2;
-            let right = f64::from(pair[1].1) * 60.0 + pair[1].2;
-            assert!(right > left, "zoomed ruler labels must remain distinct");
-        }
-    }
-    ui.hide().unwrap();
-}
-
-#[test]
 fn waveform_overview_is_tab_reachable_and_keyboard_pan_preserves_playback() {
     use slint::platform::Key;
     i_slint_backend_testing::init_no_event_loop();
@@ -3796,7 +3727,7 @@ fn scroll_timeline(ui: &AppWindow, label: &str, fraction: f32, delta_y: f32) {
 }
 
 #[test]
-fn waveform_and_ruler_wheel_zoom_keep_pointer_anchor_and_precision_deltas() {
+fn waveform_wheel_zoom_keep_pointer_anchor_and_precision_deltas() {
     i_slint_backend_testing::init_no_event_loop();
     let ui = AppWindow::new().unwrap();
     ui.window().set_size(slint::LogicalSize::new(1440.0, 900.0));
@@ -3818,7 +3749,7 @@ fn waveform_and_ruler_wheel_zoom_keep_pointer_anchor_and_precision_deltas() {
     scroll_timeline(&ui, "Waveform timeline", 0.25, 120.0);
     scroll_timeline(&ui, "Waveform timeline", 0.75, -120.0);
     for fraction in [0.1, 0.9] {
-        scroll_timeline(&ui, "Waveform time ruler", fraction, 1.0);
+        scroll_timeline(&ui, "Waveform timeline", fraction, 1.0);
     }
     let expected = [
         (2.0, 0.25),
@@ -3840,7 +3771,7 @@ fn waveform_and_ruler_wheel_zoom_keep_pointer_anchor_and_precision_deltas() {
     );
 
     let request_count = requests.borrow().len();
-    for label in ["Waveform timeline", "Waveform time ruler"] {
+    for label in ["Waveform timeline", "Waveform timeline"] {
         scroll_timeline(&ui, label, 0.5, 0.0);
         ui.set_audio_ready(false);
         scroll_timeline(&ui, label, 0.5, 120.0);
@@ -3857,7 +3788,7 @@ fn waveform_and_ruler_wheel_zoom_keep_pointer_anchor_and_precision_deltas() {
     }
     assert_eq!(requests.borrow().len(), request_count);
 
-    for (label, fraction) in [("Waveform timeline", 0.25), ("Waveform time ruler", 0.8)] {
+    for (label, fraction) in [("Waveform timeline", 0.25), ("Waveform timeline", 0.8)] {
         let position = timeline_position(&ui, label, fraction);
         ui.window()
             .dispatch_event(WindowEvent::PointerMoved { position });
@@ -3873,7 +3804,7 @@ fn waveform_and_ruler_wheel_zoom_keep_pointer_anchor_and_precision_deltas() {
     assert_eq!(seeks.borrow().len(), 2);
     assert!((seeks.borrow()[0] - 7.5).abs() < 0.001);
     assert!((seeks.borrow()[1] - 13.0).abs() < 0.001);
-    for label in ["Waveform timeline", "Waveform time ruler"] {
+    for label in ["Waveform timeline", "Waveform timeline"] {
         ui.set_audio_ready(false);
         click_at(&ui, timeline_position(&ui, label, 0.5));
         ui.set_audio_ready(true);
@@ -4002,8 +3933,8 @@ fn pending_waveform_zoom_uses_the_image_still_visible_under_the_pointer() {
     let first = view.borrow().range(100.0);
     assert!((first.0 - 12.5).abs() < 0.001 && (first.1 - 62.5).abs() < 0.001);
     // The first render has not completed and no target is published: the image
-    // and ruler still show 0..100.
-    scroll_timeline(&ui, "Waveform time ruler", 0.75, 120.0);
+    // still shows 0..100.
+    scroll_timeline(&ui, "Waveform timeline", 0.75, 120.0);
     let second = view.borrow().range(100.0);
     assert!((second.0 - 56.25).abs() < 0.001 && (second.1 - 81.25).abs() < 0.001);
     assert_eq!(view.borrow().zoom, 4.0);
