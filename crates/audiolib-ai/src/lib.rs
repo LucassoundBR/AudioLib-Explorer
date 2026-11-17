@@ -4,9 +4,31 @@ pub mod config;
 pub mod jev;
 pub mod provider;
 pub mod reference;
+pub mod relay;
 pub mod storage;
 
 use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Fixed configuration diagnostics contain no user values or credential bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum ConfigField {
+    #[error("endpoint URL")]
+    Url,
+    #[error("model ID")]
+    Model,
+    #[error("profile name")]
+    Name,
+    #[error("request timeout")]
+    Timeout,
+    #[error("API key")]
+    Key,
+    #[error("profile identity")]
+    Identity,
+    #[error("endpoint changed; enter a new API key")]
+    EndpointChanged,
+    #[error("profile count limit")]
+    ProfileLimit,
+}
 
 /// Errors contain fixed diagnostics, never HTTP bodies, URLs, prompts or secrets.
 #[derive(Debug, thiserror::Error)]
@@ -16,10 +38,15 @@ pub enum AiError {
     Uncertain,
     #[error("Invalid AI input or configuration")]
     Invalid,
+    #[error("Invalid AI configuration: {0}")]
+    InvalidConfig(ConfigField),
     #[error("AI request cancelled")]
     Cancelled,
-    #[error("AI network request failed or timed out")]
+    #[error("AI network request failed")]
     Transport,
+    /// The configured global deadline elapsed before a complete response arrived.
+    #[error("AI request timed out after {0} seconds")]
+    Timeout(u64),
     #[error("AI service returned HTTP {0}")]
     Http(u16),
     #[error("AI response failed structured validation")]
@@ -28,8 +55,12 @@ pub enum AiError {
     Storage,
     #[error("This platform supports session-only AI keys")]
     SessionOnly,
-    #[error("The configured request limit has been reached")]
-    Budget,
+    #[error("No AudioLib server is configured for AI requests")]
+    RelayUnavailable,
+    #[error("The AudioLib AI relay could not be reached")]
+    RelayTransport,
+    #[error("The AudioLib AI relay returned HTTP {0}")]
+    RelayHttp(u16),
 }
 
 /// Result with redacted AI service errors.

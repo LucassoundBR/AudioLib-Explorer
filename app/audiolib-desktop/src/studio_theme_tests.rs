@@ -735,8 +735,10 @@ fn classic_transport_keyboard_releases_once_and_cancels_on_focus_loss() {
             let position = control_center(&field);
             pointer_down(&ui, position);
             pointer_up(&ui, position);
-            // Repeat immediately precedes Pitch in the transport's tab order.
-            key(&ui, Key::Backtab.into());
+            // The continuous Pitch slider and enabled Reverse precede the field.
+            for _ in 0..3 {
+                key(&ui, Key::Backtab.into());
+            }
             changes.borrow_mut().clear();
             for activation in [slint::SharedString::from(" "), Key::Return.into()] {
                 let previous = ui.get_audition_repeat();

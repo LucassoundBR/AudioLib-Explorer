@@ -62,11 +62,11 @@ const STREAM_CHUNK_BYTES: usize = 256 * 1024;
 /// Bundle download limits are independent of its short preparation lease.
 static BUNDLE_DOWNLOAD_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(8);
 const BUNDLE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
-/// Time limit for every endpoint except `/library/snapshot`, `/audio/{id}/stream`,
+/// Time limit for ordinary endpoints except `/library/snapshot`, `/audio/{id}/stream`,
 /// `/audio/{id}/preview`, `/audio/{id}/waveform`, `/audio/{id}/artwork` and
 /// `/albums/{id}/artwork`, which
 /// legitimately take long (large bodies, waking disks, decoding); exceeding it yields
-/// 408 `TIMEOUT`.
+/// 408 `TIMEOUT`. AI relay has a separate deadline for long-running model calls.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// Largest accepted JSON request body (a 1 MiB note may double when JSON-escaped).
 const MAX_JSON_BODY_BYTES: usize = 8 * 1024 * 1024;
@@ -244,6 +244,15 @@ pub fn router_with_request_timeout(service: impl Into<Service>, timeout: Duratio
     );
     let api = with_request_timeout(timeout, open)
         .merge(protected)
+        // AI calls carry their own <=600s upstream deadline. They are independent
+        // of library readiness and must not inherit the ordinary 30s route limit.
+        .merge(with_request_timeout(
+            crate::ai_relay::REQUEST_TIMEOUT,
+            crate::ai_relay::router().route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                require_ai_token,
+            )),
+        ))
         .layer(middleware::from_fn(guard_api_mutation));
     let vendor = Router::new()
         .nest(
@@ -332,9 +341,13 @@ async fn require_bearer(
     } else {
         // Ordinary reads, streams and non-management writes keep their existing
         // admission path; a long root edit must not make them wait for its lease.
-        service
-            .security()
-            .authorize(request.headers(), connection.as_ref())
+        authorize_token(
+            service.security().clone(),
+            request.headers().clone(),
+            connection,
+            false,
+        )
+        .await
     };
     if let Err(error) = authorized {
         return error.into_response();
@@ -356,6 +369,11 @@ async fn require_bearer(
         Ok(state) => {
             // This cloned AppState pins the provider and its immutable library identity
             // for the whole request, even if Service installs a different AppState.
+            // Legacy readers omit this header; bound readers must never resolve an ID
+            // against another library, including conditional and resumed audio reads.
+            if let Err(error) = admit_read_identity(request.headers(), &state) {
+                return error.into_response();
+            }
             if library_mutation(&request) {
                 let values = request.headers().get_all(LIBRARY_ID_HEADER);
                 let mut values = values.iter();
@@ -402,6 +420,48 @@ async fn require_bearer(
 
 /// Snapshot identity required by protected library mutations.
 pub const LIBRARY_ID_HEADER: &str = "x-audiolib-library-id";
+
+fn admit_read_identity(headers: &HeaderMap, state: &AppState) -> Result<(), ApiError> {
+    if !headers.contains_key(LIBRARY_ID_HEADER) {
+        return Ok(());
+    }
+    let mut identities = headers.get_all(LIBRARY_ID_HEADER).iter();
+    let identity = identities.next().and_then(|value| value.to_str().ok());
+    let Some(identity) = identity.filter(|id| !id.trim().is_empty() && identities.next().is_none())
+    else {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "LIBRARY_ID_REQUIRED",
+            "A bound request requires one valid library identity",
+        ));
+    };
+    if identity != state.library_id() {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "LIBRARY_CHANGED",
+            "The server library changed; synchronize before reading cached record IDs",
+        ));
+    }
+    Ok(())
+}
+
+/// Generated-token checks reload their small shared store under an OS lease.
+/// Keep that filesystem work and any concurrent token update off Tokio's event loop.
+pub(crate) async fn authorize_token(
+    security: Arc<crate::Security>,
+    headers: HeaderMap,
+    connection: Option<ConnectionInfo>,
+    required: bool,
+) -> Result<(), ApiError> {
+    blocking_api(move || {
+        if required {
+            security.authorize_required_token(&headers, connection.as_ref())
+        } else {
+            security.authorize(&headers, connection.as_ref())
+        }
+    })
+    .await
+}
 
 /// Exact methods of every client route carrying `require_manage`, including HEAD
 /// for the GET filesystem browser. Match the router's path template, never a raw URI.
@@ -509,14 +569,37 @@ async fn guard_api_mutation(request: Request, next: Next) -> Response {
 /// Authorize the request per the authentication mode only (no library needed).
 async fn require_token(State(service): State<Service>, request: Request, next: Next) -> Response {
     let connection = request.extensions().get::<ConnectionInfo>().copied();
-    match service
-        .security()
-        .authorize(request.headers(), connection.as_ref())
+    match authorize_token(
+        service.security().clone(),
+        request.headers().clone(),
+        connection,
+        false,
+    )
+    .await
     {
         Ok(()) => match crate::migration::switching_write(&request) {
             Some(response) => response,
             None => next.run(request).await,
         },
+        Err(error) => error.into_response(),
+    }
+}
+
+async fn require_ai_token(
+    State(service): State<Service>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let connection = request.extensions().get::<ConnectionInfo>().copied();
+    match authorize_token(
+        service.security().clone(),
+        request.headers().clone(),
+        connection,
+        true,
+    )
+    .await
+    {
+        Ok(()) => next.run(request).await,
         Err(error) => error.into_response(),
     }
 }

@@ -2,11 +2,13 @@
 //! Who may call the API: authentication modes, external-request detection, bearer tokens
 //! generated on the admin page, and the admin settings file.
 //!
-//! * `off`: no endpoint needs a token.
+//! * `off`: ordinary endpoints need no token.
 //! * `external` (default): requests that came through a reverse proxy (any forwarding
 //!   header) or from a socket peer outside the loopback / private LAN ranges need
 //!   `Authorization: Bearer <token>`; LAN-direct requests with a trusted Host need none.
 //! * `all`: every endpoint except `/health` needs a token (the old `auth = true`).
+//!
+//! AI relay always requires a valid token, independently of these LAN exemptions.
 //!
 //! Accepted tokens: the environment token (`AUDIOLIB_SERVER_TOKEN`, when set) and tokens
 //! generated on the admin page. Only the SHA-256 hash of a generated token is stored
@@ -38,6 +40,7 @@ pub const SETTINGS_FILE: &str = "admin-settings.json";
 const SETTINGS_LOCK_FILE: &str = ".admin-settings.lock";
 /// File name of the generated-token hashes beside the library.
 pub const TOKENS_FILE: &str = "tokens.json";
+const TOKENS_LOCK_FILE: &str = ".admin-tokens.lock";
 /// `last_used_at` of a token is updated (and written) at most this often.
 pub const LAST_USED_RESOLUTION_SECS: i64 = 60;
 /// Upper bound for generated tokens.
@@ -90,6 +93,38 @@ impl Drop for SettingsLease {
             let _ = file.unlock();
         }
     }
+}
+
+/// Separate from long root/settings changes; retained after unlock to avoid replacement races.
+struct TokensLease(Option<std::fs::File>);
+
+impl Drop for TokensLease {
+    fn drop(&mut self) {
+        if let Some(file) = &self.0 {
+            let _ = file.unlock();
+        }
+    }
+}
+
+fn tokens_lease(directory: Option<&Path>) -> Result<TokensLease, ApiError> {
+    let Some(directory) = directory else {
+        return Ok(TokensLease(None));
+    };
+    std::fs::create_dir_all(directory)
+        .map_err(|error| ApiError::internal(format!("Cannot open token storage: {error}")))?;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options
+        .open(directory.join(TOKENS_LOCK_FILE))
+        .map_err(|error| ApiError::internal(format!("Cannot open token lease: {error}")))?;
+    file.lock()
+        .map_err(|error| ApiError::internal(format!("Cannot acquire token lease: {error}")))?;
+    Ok(TokensLease(Some(file)))
 }
 /// Request headers that mark a request as forwarded by a proxy.
 pub const FORWARDING_HEADERS: [&str; 5] = [
@@ -568,12 +603,21 @@ pub struct TokenInfo {
     pub last_used_at: Option<i64>,
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct TokenFile {
     #[serde(default = "format_version")]
     version: u32,
     #[serde(default)]
     tokens: Vec<TokenRecord>,
+}
+
+impl Default for TokenFile {
+    fn default() -> Self {
+        Self {
+            version: format_version(),
+            tokens: Vec::new(),
+        }
+    }
 }
 
 struct StoredToken {
@@ -706,8 +750,13 @@ impl Security {
         let mut warnings = Vec::new();
         let settings: AdminSettings =
             load_json(&dir.join(SETTINGS_FILE), &mut warnings).unwrap_or_default();
-        let tokens: TokenFile =
-            load_json(&dir.join(TOKENS_FILE), &mut warnings).unwrap_or_default();
+        let tokens: TokenFile = match tokens_lease(Some(&dir)) {
+            Ok(_lease) => load_json(&dir.join(TOKENS_FILE), &mut warnings).unwrap_or_default(),
+            Err(error) => {
+                warnings.push(format!("Cannot load generated tokens: {error:?}"));
+                TokenFile::default()
+            }
+        };
         let mut stored = Vec::new();
         for record in tokens.tokens {
             match parse_hash(&record.sha256) {
@@ -1026,13 +1075,33 @@ impl Security {
         headers: &HeaderMap,
         connection: Option<&ConnectionInfo>,
     ) -> Result<(), ApiError> {
+        self.authorize_with_requirement(headers, connection, false)
+    }
+
+    /// Require a valid bearer token even when ordinary LAN reads need none. The
+    /// regular peer-based authentication limiter and generated-token handling apply.
+    pub fn authorize_required_token(
+        self: &Arc<Self>,
+        headers: &HeaderMap,
+        connection: Option<&ConnectionInfo>,
+    ) -> Result<(), ApiError> {
+        self.authorize_with_requirement(headers, connection, true)
+    }
+
+    fn authorize_with_requirement(
+        self: &Arc<Self>,
+        headers: &HeaderMap,
+        connection: Option<&ConnectionInfo>,
+        force_token: bool,
+    ) -> Result<(), ApiError> {
         let mode = self.auth_mode();
         let origin = self.classify(headers, connection);
-        let required = match mode {
-            AuthMode::Off => false,
-            AuthMode::All => true,
-            AuthMode::External => origin == RequestOrigin::External,
-        };
+        let required = force_token
+            || match mode {
+                AuthMode::Off => false,
+                AuthMode::All => true,
+                AuthMode::External => origin == RequestOrigin::External,
+            };
         let presented = headers
             .get(header::AUTHORIZATION)
             .and_then(|value| value.to_str().ok())
@@ -1092,6 +1161,9 @@ impl Security {
         Err(if !required {
             host_forbidden()
         } else if presented.is_none() {
+            if force_token {
+                return Err(ApiError::unauthorized());
+            }
             match mode {
                 AuthMode::External => ApiError::token_required(
                     "A bearer token is required: this request is not from a trusted direct LAN peer",
@@ -1135,19 +1207,37 @@ impl Security {
             })
     }
 
-    /// Whether `presented` is the environment token or a generated (not revoked) token.
-    /// Every stored hash is compared in constant time.
+    /// Blocking. Whether `presented` is the environment token or a generated token.
+    /// Every stored hash is compared in constant time after current revocations load.
     pub fn verify(self: &Arc<Self>, presented: &str) -> bool {
         let env_ok = self
             .env_token
             .as_ref()
             .is_some_and(|token| token.matches(presented));
-        let generated = self.verify_generated(presented);
-        env_ok || generated
+        if env_ok {
+            return true;
+        }
+        self.verify_generated(presented)
     }
 
-    /// Whether `presented` is a generated (not revoked) token, recording its use.
+    /// Blocking: reload under the cross-process lease before checking revocation.
     fn verify_generated(self: &Arc<Self>, presented: &str) -> bool {
+        match self.verify_generated_current(presented) {
+            Ok(verified) => verified,
+            Err(error) => {
+                tracing::warn!(?error, "Cannot verify generated tokens; refusing access");
+                false
+            }
+        }
+    }
+
+    fn verify_generated_current(&self, presented: &str) -> Result<bool, ApiError> {
+        let _lease = tokens_lease(self.dir.as_deref())?;
+        let _write = self
+            .write_lock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        self.reload_tokens_locked()?;
         let hash = sha256(presented.as_bytes());
         let matched = {
             let state = self.read();
@@ -1162,40 +1252,52 @@ impl Security {
         if let Some((_, id, last_used)) = &matched {
             let now = unix_now();
             if last_used.is_none_or(|last| now - last >= LAST_USED_RESOLUTION_SECS) {
-                self.touch(id, now);
-            }
-        }
-        matched.is_some()
-    }
-
-    /// Update `last_used_at` in memory and write the token file off the request path.
-    fn touch(self: &Arc<Self>, id: &str, now: i64) {
-        {
-            let mut state = self.write();
-            match state.tokens.iter_mut().find(|token| token.record.id == id) {
-                Some(token)
-                    if token
-                        .record
-                        .last_used_at
-                        .is_none_or(|last| now - last >= LAST_USED_RESOLUTION_SECS) =>
+                // Keep reload, acceptance and bookkeeping in one lease. A stale
+                // last-used update must never recreate another process's revoked token.
+                if let Some(token) = self
+                    .write()
+                    .tokens
+                    .iter_mut()
+                    .find(|token| token.record.id == *id)
                 {
                     token.record.last_used_at = Some(now);
                 }
-                _ => return,
+                if let Err(error) = self.persist_tokens_locked() {
+                    tracing::warn!(?error, "Cannot record token last use");
+                }
             }
         }
-        let this = self.clone();
-        let persist = move || {
-            if let Err(error) = this.persist_tokens() {
-                tracing::warn!(?error, "Cannot record token last use");
+        Ok(matched.is_some())
+    }
+
+    /// Reload without startup repair: malformed or unreadable storage fails closed.
+    /// The caller holds both the token-file lease and process write lock.
+    fn reload_tokens_locked(&self) -> Result<(), ApiError> {
+        let Some(directory) = &self.dir else {
+            return Ok(());
+        };
+        let file: TokenFile = match std::fs::read(directory.join(TOKENS_FILE)) {
+            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|error| {
+                ApiError::internal(format!("Cannot decode generated token storage: {error}"))
+            })?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => TokenFile::default(),
+            Err(error) => {
+                return Err(ApiError::internal(format!(
+                    "Cannot read generated token storage: {error}"
+                )));
             }
         };
-        match tokio::runtime::Handle::try_current() {
-            Ok(runtime) => {
-                runtime.spawn_blocking(persist);
-            }
-            Err(_) => persist(),
+        if file.version != format_version() || file.tokens.len() > MAX_TOKENS {
+            return Err(ApiError::internal("Invalid generated token storage"));
         }
+        let mut tokens = Vec::with_capacity(file.tokens.len());
+        for record in file.tokens {
+            let hash = parse_hash(&record.sha256)
+                .ok_or_else(|| ApiError::internal("Invalid generated token hash"))?;
+            tokens.push(StoredToken { record, hash });
+        }
+        self.write().tokens = tokens;
+        Ok(())
     }
 
     /// Generated tokens, oldest first.
@@ -1212,6 +1314,17 @@ impl Security {
             .collect()
     }
 
+    /// Blocking. List the current cross-instance token view without exposing hashes.
+    pub fn current_tokens(&self) -> Result<Vec<TokenInfo>, ApiError> {
+        let _lease = tokens_lease(self.dir.as_deref())?;
+        let _write = self
+            .write_lock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        self.reload_tokens_locked()?;
+        Ok(self.tokens())
+    }
+
     /// Blocking. Generate a token named `name`; returns its info and the plaintext secret,
     /// which is not kept anywhere.
     pub fn create_token(&self, name: &str) -> Result<(TokenInfo, String), ApiError> {
@@ -1221,10 +1334,12 @@ impl Security {
                 "Token name must be 1..=64 characters without control characters",
             ));
         }
+        let _lease = tokens_lease(self.dir.as_deref())?;
         let _guard = self
             .write_lock
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
+        self.reload_tokens_locked()?;
         if self.read().tokens.len() >= MAX_TOKENS {
             return Err(ApiError::validation(format!(
                 "At most {MAX_TOKENS} tokens; revoke unused ones first"
@@ -1257,10 +1372,12 @@ impl Security {
 
     /// Blocking. Revoke (delete) a generated token; `false` for an unknown id.
     pub fn revoke_token(&self, id: &str) -> Result<bool, ApiError> {
+        let _lease = tokens_lease(self.dir.as_deref())?;
         let _guard = self
             .write_lock
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
+        self.reload_tokens_locked()?;
         let removed = {
             let mut state = self.write();
             let index = state.tokens.iter().position(|token| token.record.id == id);
@@ -1321,14 +1438,6 @@ impl Security {
                 *tls = effective;
             });
         }
-    }
-
-    fn persist_tokens(&self) -> Result<(), ApiError> {
-        let _guard = self
-            .write_lock
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        self.persist_tokens_locked()
     }
 
     fn persist_tokens_locked(&self) -> Result<(), ApiError> {

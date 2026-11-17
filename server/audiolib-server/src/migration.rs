@@ -176,6 +176,16 @@ pub(crate) async fn headers(
     mut request: Request,
     next: Next,
 ) -> Response {
+    // AI is independent of the served library. Even a status read can wait on a
+    // sleeping volume or the report publication lease, before route auth/timeouts.
+    // Keep this exception exact so library and administrative routes retain their
+    // migration admission and canonical status headers.
+    if matches!(
+        request.uri().path(),
+        "/api/v1/ai/models" | "/api/v1/ai/generate"
+    ) {
+        return next.run(request).await;
+    }
     let report = match service.app_state() {
         Ok(state) => tokio::task::spawn_blocking(move || {
             migration9::status(state.provider().database_path())
@@ -194,15 +204,19 @@ pub(crate) async fn headers(
     let vendor = request.uri().path() == "/api/vendor-import"
         || request.uri().path().starts_with("/api/vendor-import/");
     let mut response = if vendor && let Some(response) = switching_write(&request) {
-        let connection = request.extensions().get::<crate::ConnectionInfo>();
-        match service
-            .security()
-            .authorize(request.headers(), connection)
-            .and_then(|()| {
-                service
-                    .security()
-                    .authorize_manage(request.headers(), connection)
-            }) {
+        let connection = request.extensions().get::<crate::ConnectionInfo>().copied();
+        match crate::routes::authorize_token(
+            service.security().clone(),
+            request.headers().clone(),
+            connection,
+            false,
+        )
+        .await
+        .and_then(|()| {
+            service
+                .security()
+                .authorize_manage(request.headers(), connection.as_ref())
+        }) {
             Ok(()) => response,
             Err(error) => error.into_response(),
         }

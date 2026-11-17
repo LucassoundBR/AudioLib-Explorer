@@ -1,5 +1,8 @@
 # Night UI implementation checkpoints
 
+Upstream v1.0.2 integration and its current validation/remaining acceptance:
+[integration checkpoint](Integration_1.0.2.md).
+
 ## Mirrored Reverse presentation checkpoint — 2026-11-16
 
 Stage4 preserves original engine/renderer-cache/export coordinates. AuditionPanel

@@ -1,7 +1,7 @@
 // crates/audiolib-ai/src/storage.rs
-//! Atomic AI profiles, encrypted Windows credentials and conservative request accounting.
+//! Atomic AI profiles, encrypted Windows credentials and informational usage history.
 use crate::{
-    AiError, Result,
+    AiError, ConfigField, Result,
     config::{ApiKey, Profile, PromptSettings, Protocol, validate_instruction},
 };
 use serde::{Deserialize, Serialize};
@@ -158,7 +158,7 @@ impl ProfileStore {
             return Ok(ApiKey::default());
         };
         if saved.base_url != draft.base_url || saved.protocol != draft.protocol {
-            return Err(AiError::Invalid);
+            return Err(AiError::InvalidConfig(ConfigField::EndpointChanged));
         }
         self.key(saved)
     }
@@ -189,13 +189,13 @@ impl ProfileStore {
         let mut next = self.copy_document();
         let old = next.profiles.iter().find(|p| p.id == profile.id).cloned();
         if old.is_none() && next.profiles.len() >= 16 {
-            return Err(AiError::Invalid);
+            return Err(AiError::InvalidConfig(ConfigField::ProfileLimit));
         }
         if let Some(old) = &old {
             if key.is_none()
                 && (old.base_url != profile.base_url || old.protocol != profile.protocol)
             {
-                return Err(AiError::Invalid);
+                return Err(AiError::InvalidConfig(ConfigField::EndpointChanged));
             }
             profile.credential_ref = old.credential_ref.clone();
         }
@@ -247,9 +247,10 @@ impl ProfileStore {
         });
         Ok(())
     }
-    /// Persist a request reservation before sending. Failures remain counted because
+    /// Record an attempt before sending, without imposing a local request allowance.
+    /// Failures remain counted because
     /// a timed-out provider may have processed and billed the request.
-    pub fn reserve(&mut self, profile: &Profile, month: &str) -> Result<()> {
+    pub fn record_request(&mut self, profile: &Profile, month: &str) -> Result<()> {
         if month.len() != 7 || !month.chars().all(|c| c.is_ascii_digit() || c == '-') {
             return Err(AiError::Invalid);
         }
@@ -261,10 +262,7 @@ impl ProfileStore {
                 ..Default::default()
             };
         }
-        if usage.requests >= profile.max_requests_per_month {
-            return Err(AiError::Budget);
-        }
-        usage.requests += 1;
+        usage.requests = usage.requests.saturating_add(1);
         self.persist_document(&next)?;
         self.document = next;
         Ok(())
@@ -284,6 +282,66 @@ impl ProfileStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn clipboard_key_whitespace_is_not_retained_in_session_or_protected_storage() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = ProfileStore::open(dir.path()).unwrap();
+        store
+            .save(
+                Profile {
+                    model: "gpt-4.1".into(),
+                    ..Default::default()
+                },
+                Some(ApiKey::new(" \towned-clipboard-key\r\n".into()).unwrap()),
+            )
+            .unwrap();
+        let saved = store.selected().unwrap().clone();
+        assert_eq!(store.key(&saved).unwrap().expose(), "owned-clipboard-key");
+        assert!(
+            !std::fs::read_to_string(&store.path)
+                .unwrap()
+                .contains("owned-clipboard-key")
+        );
+        if audiolib_windows::user_secret_protection_available() {
+            let reopened = ProfileStore::open(dir.path()).unwrap();
+            assert_eq!(
+                reopened.key(&saved).unwrap().expose(),
+                "owned-clipboard-key"
+            );
+        }
+    }
+
+    #[test]
+    fn magpie_lan_profiles_persist_without_loosening_credential_binding() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = ProfileStore::open(dir.path()).unwrap();
+        store
+            .save(
+                Profile {
+                    protocol: Protocol::Magpie,
+                    base_url: "http://192.168.31.3:3425/v1".into(),
+                    model: "group/sound-design".into(),
+                    ..Default::default()
+                },
+                Some(ApiKey::new("owned-gateway-key".into()).unwrap()),
+            )
+            .unwrap();
+        let saved = store.selected().unwrap().clone();
+        let before = std::fs::read(&store.path).unwrap();
+        let reopened = ProfileStore::open(dir.path()).unwrap();
+        assert_eq!(reopened.selected().unwrap(), &saved);
+        let mut draft = saved.clone();
+        draft.protocol = Protocol::ChatCompletions;
+        assert!(store.save(draft, None).is_err());
+        let mut draft = saved.clone();
+        draft.base_url = "http://192.168.31.4:3425/v1".into();
+        assert!(draft.validate_discovery_request().is_ok());
+        assert!(store.discovery_key(&draft, None).is_err());
+        assert!(store.save(draft, None).is_err());
+        assert_eq!(store.selected().unwrap(), &saved);
+        assert_eq!(std::fs::read(&store.path).unwrap(), before);
+    }
+
     use crate::config::Protocol;
     #[test]
     fn profile_names_and_hidden_key_presence_survive_reopening() {
@@ -397,7 +455,7 @@ mod tests {
         assert!(!reopened.prompt().use_custom);
     }
     #[test]
-    fn future_configuration_and_atomic_budget_are_preserved() {
+    fn retired_limits_do_not_reject_attempts_and_future_configuration_is_preserved() {
         let dir = tempfile::tempdir().unwrap();
         let mut store = ProfileStore::open(dir.path()).unwrap();
         let p = Profile {
@@ -411,9 +469,25 @@ mod tests {
         let bytes = std::fs::read_to_string(&store.path).unwrap();
         assert!(!bytes.contains("PRIVATE-KEY"));
         assert!(!store.key(store.selected().unwrap()).unwrap().is_empty());
-        store.reserve(&p, "2026-11").unwrap();
-        assert!(matches!(store.reserve(&p, "2026-11"), Err(AiError::Budget)));
-        store.reserve(&p, "2026-12").unwrap();
+        store.record_request(&p, "2026-11").unwrap();
+        store.record_request(&p, "2026-11").unwrap();
+        store.record_tokens(&p.id, 25, 13).unwrap();
+        assert_eq!(store.usage(&p.id).requests, 2);
+        let mut edited = store.selected().unwrap().clone();
+        edited.request_mode = crate::config::RequestMode::Server;
+        edited.timeout_seconds = 600;
+        store.save(edited, None).unwrap();
+        let reopened = ProfileStore::open(dir.path()).unwrap();
+        assert_eq!(reopened.usage(&p.id).requests, 2);
+        assert_eq!(reopened.usage(&p.id).input_tokens, 25);
+        assert_eq!(reopened.usage(&p.id).output_tokens, 13);
+        assert_eq!(reopened.selected().unwrap().timeout_seconds, 600);
+        #[cfg(windows)]
+        assert_eq!(
+            reopened.key(reopened.selected().unwrap()).unwrap().expose(),
+            "PRIVATE-KEY"
+        );
+        store.record_request(&p, "2026-12").unwrap();
         let future = bytes.replace("\"version\": 1", "\"version\": 999");
         std::fs::write(&store.path, &future).unwrap();
         assert!(ProfileStore::open(dir.path()).is_err());

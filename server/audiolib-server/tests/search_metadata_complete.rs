@@ -465,19 +465,24 @@ async fn vendor_csv_biff8_xlsx_http_lifecycle_preserves_snapshot_annotations_and
         let identity = client.library().unwrap().library_id;
         let client = client.with_library_id(&identity).unwrap();
         assert!(client.capabilities().unwrap().vendor_import.is_some());
-        let (status, body) = http(
-            &url,
-            "GET",
-            &format!("{VENDOR_IMPORT_API}/"),
-            Some("wrong-library"),
-            &[],
-            &[],
-        );
-        assert_eq!(status, 409, "{}", String::from_utf8_lossy(&body));
-        assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(&body).unwrap()["error_code"],
-            "LIBRARY_ID_REQUIRED"
-        );
+        for (library_id, error_code) in [
+            (None, "LIBRARY_ID_REQUIRED"),
+            (Some("wrong-library"), "LIBRARY_CHANGED"),
+        ] {
+            let (status, body) = http(
+                &url,
+                "GET",
+                &format!("{VENDOR_IMPORT_API}/"),
+                library_id,
+                &[],
+                &[],
+            );
+            assert_eq!(status, 409, "{}", String::from_utf8_lossy(&body));
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&body).unwrap()["error_code"],
+                error_code
+            );
+        }
         let mut batches = Vec::new();
         for name in ["basic.csv", "basic.xls", "basic.xlsx"] {
             let source = fixtures("audiolib-db/tests/fixtures/vendor_import").join(name);
