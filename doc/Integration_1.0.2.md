@@ -189,16 +189,74 @@ estimates, not measured physical free-space recovery. SDKs, Cargo/Rustup home,
 dist, local_release, libraries/audio and validation evidence were preserved.
 No further Rust compilation was needed for this PowerShell-only correction.
 
-## Delivery boundary and next action
+## Source checkpoint boundary
 
-This is a source integration checkpoint. No new daily installation, release tag,
-GitHub Release or upstream push is implied. `local_release/` still contains the
-previous accepted 1.0.0 package; it must not be reported as accepted 1.0.2.
+At the source integration checkpoint, no daily installation, release tag,
+GitHub Release or upstream push was implied. The previous accepted 1.0.0
+installation remained in place until the final acceptance below.
 
 For a requested local tryout, build a final release candidate once, run applicable
 CLI data-safety acceptance on that candidate, then package and perform
 portable/native startup acceptance and installation in an agreed interactive
 test window. Ordinary integration/commit work does not trigger that delivery.
-Native playback/REAPER Auto-Focus, real ASIO hardware, other platforms and live
-provider APIs remain unverified for this merge. Do not launch GUI/REAPER merely
-because the command is hidden. Preserve libraries, Metadata and preferences.
+Real ASIO hardware, other platforms and live provider APIs remain unverified for
+this merge. Do not launch GUI/REAPER merely because the command is hidden.
+Preserve libraries, Metadata and preferences.
+
+## Final Windows local acceptance — 2026-11-17
+
+Built release source `da031e493937f9d67080b0854c23574197a28739` once to
+completion after resuming the interrupted build. License preflight, directory
+packaging and portable acceptance PASS. No archive, tag or GitHub Release was
+requested. Previously passing source checks above were reused; pipeline source
+checks are explicitly `not-requested`, not a fresh source-suite pass.
+
+During the authorized interactive window, an isolated synthetic 12-second
+48 kHz / 24-bit stereo WAV and owned library were used with muted WASAPI output.
+After a waveform drag selection, Space started playback, paused it, and resumed
+it. Local IPC confirmed `playing → paused → playing`, volume zero and an
+unchanged frame range `[103085, 336764)`.
+
+The user's modified REAPER project was preserved. The user saved/closed their
+session before native sending. Only the persistent dedicated REAPER profile
+was then opened, with Dummy Audio confirmed in the actual host UI. The enabled
+Still Evaluating control was confirmed normally; no licensing state was changed.
+No Lua was launched; the existing native bridge DLL handled both sends.
+
+The no-selected-track guard rejected the first button attempt without inserting
+media. After selecting the fixture's single track, the button inserted one
+12-second item at edit cursor 2.5 seconds. Its imported WAV was byte-identical
+to the source. With Auto-Focus enabled, S inserted the selected 233679 frames
+(4.8683125 seconds) at 2.5 seconds and brought REAPER in front of AudioLib without
+manual activation. The app's success status had no focus-denied/unavailable
+suffix. The saved owned RPP contained exactly two items. The slice retained
+48 kHz, 24 bits and stereo; its PCM bytes matched the exact selected source
+frames. Both test applications were closed normally afterward.
+
+Native execution generated an empty `.audiolib-update.lock` in the portable
+directory. The installer correctly rejected that non-package file before
+copying. After closing the test app, only that owned runtime lock was moved to
+private test evidence; the unchanged accepted payload was installed successfully.
+`install-local-release.ps1` verified 908 package-owned files, copied 31 changed
+files, confirmed `AudioLibCli 1.0.2` and passed isolated installed-desktop startup.
+The fixed installation is now `local_release/`; working libraries, Metadata and
+preferences were not replaced. No full build or portable suite was repeated.
+
+Accepted executable SHA256 identities:
+
+- Desktop: `4379ECC2E0CF1598454E59704D444F371557077C9BBC44B99865DA8FF5510DE4`
+- CLI: `A7DEC0DB2264B506CDFC78E86C8B5607C3C6CFC39D7C2556FB9B0D2703616556`
+
+Private receipts: `.rust-validation/release-pipeline/delivery-1.0.2/state.json`,
+`.rust-validation/night-ui/delivery-native-run.json` and
+`.rust-validation/local-install/268c67755d184fd5bdab4fec84747d14/report.json`.
+The earlier Windows symlink-privilege limitation in `validate-review-fixes.ps1`
+and unavailable real audio/other-platform coverage remain as recorded above.
+
+After acceptance and installation, the verified owned `target/` Intermediate
+cleanup PASS removed about 2.56 logical GiB, retaining about 1.88 GiB of final
+outputs/other preserved contents. SDKs, package, installation, working data and
+test evidence were preserved. A sandboxed plan could not open the Git lease;
+the same plan/run with lease access passed, with no active compiler terminated.
+The next action is ordinary user acceptance through
+`local_release/Start-AudioLibExplorer.cmd`; no additional build is required.
