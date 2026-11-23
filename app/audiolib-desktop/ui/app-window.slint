@@ -3190,6 +3190,18 @@ export component AppWindow inherits Window {
             reject
         }
         capture-key-released(event) => { root.background-blocked ? accept : reject }
+        // Editors and keyboard-focused buttons handle Space first. A slider can
+        // keep its own focus for arrow keys and let Space fall through here.
+        key-pressed(event) => {
+            if event.text == " " && root.menu-ready && !root.background-blocked
+                && root.audio-ready && !root.wave-selection-gesture
+                && !event.modifiers.alt && !event.modifiers.control && !event.modifiers.meta
+            {
+                if !event.repeat { root.play-requested(); }
+                return accept;
+            }
+            reject
+        }
     // The minimum window size stays 1080x700; when a large interface scale makes the
     // layout's minimum larger than the window, the whole main view scrolls instead of
     // being cut off. At 1.0 the viewport equals the window, so nothing changes.

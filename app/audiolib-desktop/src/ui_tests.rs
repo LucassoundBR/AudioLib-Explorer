@@ -1794,6 +1794,78 @@ fn folder_menu_modal_focus_keeps_path_input_and_tabs_out_of_background_metadata(
 }
 
 #[test]
+fn space_keeps_original_sound_after_clicking_classic_repeat() {
+    i_slint_backend_testing::init_no_event_loop();
+    let ui = AppWindow::new().unwrap();
+    crate::theme::apply_theme(&ui, audiolib_core::config::DEFAULT_THEME);
+    ui.window().set_size(slint::LogicalSize::new(1440.0, 900.0));
+    ui.set_rows(ModelRc::new(VecModel::from(vec![AudioRow {
+        id: "42".into(),
+        name: "Transport focus.wav".into(),
+        ..Default::default()
+    }])));
+    ui.set_selected_row(0);
+    ui.set_has_selection(true);
+    ui.set_selected_id("42".into());
+    ui.set_audio_ready(true);
+    let plays = Rc::new(RefCell::new(0));
+    let observed = plays.clone();
+    ui.on_play_requested(move || *observed.borrow_mut() += 1);
+    ui.show().unwrap();
+
+    click_label(&ui, "Transport focus.wav");
+    send_keys(&ui, &[" ".into()]);
+    assert_eq!(*plays.borrow(), 1, "Space starts in the result list");
+
+    let repeat_before = ui.get_audition_repeat();
+    click_label(&ui, "Repeat sound");
+    assert_ne!(
+        ui.get_audition_repeat(),
+        repeat_before,
+        "the pointer clicked Repeat"
+    );
+    send_keys(&ui, &[" ".into()]);
+    assert_eq!(*plays.borrow(), 2, "Space still controls playback");
+    assert_ne!(
+        ui.get_audition_repeat(),
+        repeat_before,
+        "Space did not toggle Repeat"
+    );
+
+    let volume_before = ui.get_volume_db();
+    let volume = ElementHandle::find_by_accessible_label(&ui, "Volume")
+        .find(|item| item.accessible_role() == Some(AccessibleRole::Slider))
+        .expect("the playback volume slider");
+    let origin = volume.absolute_position();
+    let size = volume.size();
+    click_at(
+        &ui,
+        slint::LogicalPosition::new(origin.x + size.width / 2.0, origin.y + size.height / 2.0),
+    );
+    send_keys(&ui, &[slint::platform::Key::LeftArrow.into()]);
+    assert_ne!(
+        ui.get_volume_db(),
+        volume_before,
+        "the volume slider retained keyboard focus"
+    );
+    ui.window()
+        .dispatch_event(WindowEvent::KeyPressed { text: " ".into() });
+    ui.window()
+        .dispatch_event(WindowEvent::KeyPressRepeated { text: " ".into() });
+    ui.window()
+        .dispatch_event(WindowEvent::KeyReleased { text: " ".into() });
+    assert_eq!(*plays.borrow(), 3, "Space works with slider focus");
+
+    click_label(&ui, "Search keywords");
+    send_keys(&ui, &["a".into()]);
+    send_keys(&ui, &[" ".into()]);
+    send_keys(&ui, &["b".into()]);
+    assert_eq!(ui.get_search_entry_text(), "a b");
+    assert_eq!(*plays.borrow(), 3, "typing does not trigger playback");
+    ui.hide().unwrap();
+}
+
+#[test]
 fn library_menu_modal_blocks_background_audition_and_wraps_dynamic_keyboard_controls() {
     i_slint_backend_testing::init_no_event_loop();
     for chinese in [false, true] {

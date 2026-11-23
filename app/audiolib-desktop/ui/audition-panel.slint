@@ -70,6 +70,7 @@ component GuardedActionArea inherits TouchArea {
 // Transport and monitoring actions fire once on release, as in Classic. Native
 // key repeat must not alternate playback or a monitoring toggle while held.
 component ActionKeyScope inherits FocusScope {
+    focus-on-click: false;
     in property <bool> keyboard-active: true;
     property <string> held-key;
     out property <bool> held: root.held-key != "";
@@ -836,6 +837,7 @@ component ClassicTool inherits Rectangle {
     }
     focus := FocusScope {
         enabled: root.enabled;
+        focus-on-click: false;
         changed has-focus => { if !self.has-focus { root.held-key = ""; } }
         key-pressed(event) => {
             if event.text == Key.Escape && root.keyboard-held {
@@ -1536,7 +1538,10 @@ component ClassicAuditionPanel inherits Rectangle {
                     if !root.ready { return reject; }
                     if event.text == Key.Escape { if root.selection-gesture { root.selection-cancel-requested(); } else if root.selection-preparing { root.selection-cancel-requested(); } else { root.selection-cleared(); } return accept; }
                     if root.selection-gesture { return accept; }
-                    if event.text == " " { if root.playing { root.pause(); } else { root.play(); } return accept; }
+                    if event.text == " " {
+                        if !event.repeat { if root.playing { root.pause(); } else { root.play(); } }
+                        return accept;
+                    }
                     if event.text == Key.LeftArrow || event.text == Key.RightArrow {
                         let nudge = (event.modifiers.shift ? 0.25 : 0.05) * (root.shown-end - root.shown-start);
                         root.seek(clamp(root.visual-position + (event.text == Key.LeftArrow ? -nudge : nudge), 0, root.duration));
@@ -2044,7 +2049,7 @@ component WorkbenchAuditionPanel inherits Rectangle {
                         if !root.ready { return reject; }
                         if event.text == Key.Escape { if root.selection-gesture { root.selection-cancel-requested(); } else if root.selection-preparing { root.selection-cancel-requested(); } else { root.selection-cleared(); } return accept; }
                         if root.selection-gesture { return accept; }
-                        if event.text == " " { root.toggle(); return accept; }
+                        if event.text == " " { if !event.repeat { root.toggle(); } return accept; }
                         if event.text == Key.LeftArrow || event.text == Key.RightArrow {
                             let nudge = (event.modifiers.shift ? 0.25 : 0.05) * (root.shown-end - root.shown-start);
                             root.seek(clamp(root.visual-position + (event.text == Key.LeftArrow ? -nudge : nudge), 0, root.duration));
