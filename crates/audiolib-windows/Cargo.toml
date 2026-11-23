@@ -12,6 +12,7 @@ asio = []
 [dependencies]
 audiolib-core = { path = "../audiolib-core" }
 serde.workspace = true
+tempfile = "3"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
