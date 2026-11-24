@@ -210,6 +210,7 @@ export component ThemedSlider inherits Rectangle {
 }
 
 export component ThemedCheckBox inherits Rectangle {
+    in property <string> description;
     in property <int> text-module: 0;
     in property <string> text <=> native.text;
     in property <bool> enabled <=> native.enabled;
@@ -221,7 +222,10 @@ export component ThemedCheckBox inherits Rectangle {
     // The painted layout owns the scaled geometry. Fluent's native checkbox uses
     // an unscaled 18px indicator and 12px gap, so using its implicit layout here
     // would under-allocate both dimensions when the interface is enlarged.
-    native := CheckBox { width: parent.width; height: parent.height; }
+    native := CheckBox {
+        width: parent.width; height: parent.height;
+        accessible-role: checkbox; accessible-description: root.description;
+    }
     Rectangle { background: root.surface; }
     HorizontalLayout {
         padding: 0px; spacing: 12px * Theme.ui-scale;

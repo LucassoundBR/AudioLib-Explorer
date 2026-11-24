@@ -1,8 +1,8 @@
 // app/audiolib-desktop/src/window_keyboard.rs
 //! Preserve activation-key repeat metadata lost by Slint 1.17.1's winit backend.
 //!
-//! Only real repeated Space/Enter presses are forwarded through Slint's public
-//! repeated-key input. Other keys, releases and modifiers remain backend-owned.
+//! Real repeated Space, Enter and S shortcut presses use Slint's
+//! public repeated-key input. Other events remain backend-owned.
 //! Ctrl+Alt combinations also remain backend-owned: on Windows the public input
 //! API cannot supply `text_without_modifiers`, which Slint needs to distinguish
 //! Ctrl+Alt from AltGr. Revisit this narrow adapter when upgrading Slint.
@@ -76,12 +76,20 @@ fn repeat_text(
     {
         return None;
     }
-    // Match Slint 1.17.1's to_slint_key mapping exactly for these two keys.
+    // Match Slint 1.17.1's to_slint_key mapping for the forwarded keys.
     // Named Enter maps to LF (Key::Return), regardless of winit event.text.
     match key {
         Key::Named(NamedKey::Space) => Some(" ".into()),
         Key::Named(NamedKey::Enter) => Some(slint::platform::Key::Return.into()),
         Key::Character(text) if text == " " || text == "\n" => Some(text.as_str().into()),
+        Key::Character(text)
+            if matches!(text.as_str(), "s" | "S")
+                && !modifiers.intersects(
+                    ModifiersState::CONTROL | ModifiersState::ALT | ModifiersState::SUPER,
+                ) =>
+        {
+            Some(text.as_str().into())
+        }
         _ => None,
     }
 }
@@ -94,7 +102,7 @@ mod tests {
     use std::{cell::Cell, rc::Rc, time::Duration};
 
     #[test]
-    fn repeat_mapping_is_limited_to_real_pressed_activation_keys() {
+    fn reaper_and_transport_repeat_mapping_only_for_real_shortcut_presses() {
         let space = Key::Named(NamedKey::Space);
         let enter = Key::Named(NamedKey::Enter);
         for (key, expected) in [
@@ -114,6 +122,35 @@ mod tests {
                     Some(expected)
                 );
             }
+        }
+        for (text, modifiers) in [("s", ModifiersState::empty()), ("S", ModifiersState::SHIFT)] {
+            assert_eq!(
+                repeat_text(
+                    &Key::Character(text.into()),
+                    ElementState::Pressed,
+                    true,
+                    false,
+                    modifiers
+                )
+                .as_deref(),
+                Some(text)
+            );
+        }
+        for modifiers in [
+            ModifiersState::CONTROL,
+            ModifiersState::ALT,
+            ModifiersState::SUPER,
+        ] {
+            assert!(
+                repeat_text(
+                    &Key::Character("s".into()),
+                    ElementState::Pressed,
+                    true,
+                    false,
+                    modifiers
+                )
+                .is_none()
+            );
         }
         for (state, repeated, synthetic, modifiers) in [
             (ElementState::Released, true, false, ModifiersState::empty()),

@@ -1866,6 +1866,51 @@ fn space_keeps_original_sound_after_clicking_classic_repeat() {
 }
 
 #[test]
+fn reaper_button_and_s_share_one_send_and_respect_editors_and_modals() {
+    i_slint_backend_testing::init_no_event_loop();
+    let ui = AppWindow::new().unwrap();
+    crate::theme::apply_theme(&ui, audiolib_core::config::DEFAULT_THEME);
+    ui.window()
+        .set_size(slint::LogicalSize::new(1600.0, 1000.0));
+    ui.set_reaper_supported(true);
+    ui.set_rows(ModelRc::new(VecModel::from(vec![AudioRow {
+        id: "42".into(),
+        name: "REAPER test sound.wav".into(),
+        ..Default::default()
+    }])));
+    ui.set_has_selection(true);
+    ui.set_selected_id("42".into());
+    ui.set_selected_row(0);
+    ui.set_audio_ready(true);
+    let sends = Rc::new(RefCell::new(0));
+    let observed = sends.clone();
+    ui.on_reaper_send_requested(move || *observed.borrow_mut() += 1);
+    ui.show().unwrap();
+
+    click_label(&ui, "REAPER test sound.wav");
+    click_label(&ui, "Send to REAPER");
+    assert_eq!(*sends.borrow(), 1);
+    ui.window()
+        .dispatch_event(WindowEvent::KeyPressed { text: "s".into() });
+    ui.window()
+        .dispatch_event(WindowEvent::KeyPressRepeated { text: "s".into() });
+    ui.window()
+        .dispatch_event(WindowEvent::KeyReleased { text: "s".into() });
+    assert_eq!(*sends.borrow(), 2);
+    click_label(&ui, "Auto-Focus");
+    assert!(ui.get_reaper_auto_focus());
+
+    click_label(&ui, "Search keywords");
+    send_keys(&ui, &["s".into()]);
+    assert_eq!(ui.get_search_entry_text(), "s");
+    assert_eq!(*sends.borrow(), 2);
+    click_label(&ui, "Peak display settings");
+    send_keys(&ui, &["s".into()]);
+    assert_eq!(*sends.borrow(), 2);
+    ui.hide().unwrap();
+}
+
+#[test]
 fn library_menu_modal_blocks_background_audition_and_wraps_dynamic_keyboard_controls() {
     i_slint_backend_testing::init_no_event_loop();
     for chinese in [false, true] {

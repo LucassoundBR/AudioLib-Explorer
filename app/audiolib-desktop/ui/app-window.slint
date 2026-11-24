@@ -1844,6 +1844,13 @@ export component AppWindow inherits Window {
     callback history-clear-requested();
 
     in-out property <bool> peaks-visible: false;
+    in property <bool> reaper-supported: false;
+    in property <bool> reaper-busy: false;
+    in-out property <bool> reaper-auto-focus: false;
+    callback reaper-send-requested();
+    callback reaper-setup-requested();
+    private property <bool> reaper-send-ready: root.reaper-supported &&
+        (root.wave-selection-active ? !root.wave-selection-preparing : root.has-selection && !root.selected-missing && !root.remote-mode);
     in-out property <int> peak-mode: 1;
     in-out property <float> peak-gain: 0;
     in-out property <float> peak-opacity: 0.85;
@@ -3126,6 +3133,7 @@ export component AppWindow inherits Window {
             MenuItem { title: root.chinese ? "Spectral Peaks 设置…" : "Spectral Peaks settings…"; enabled: root.menu-ready; activated => { root.peaks-visible = true; } }
         }
         Menu { title: root.chinese ? "设置" : "Settings"; enabled: root.menu-ready;
+            MenuItem { title: root.chinese ? "导出 REAPER 扩展…" : "Export REAPER extension…"; enabled: root.menu-ready && root.reaper-supported && !root.reaper-busy; activated => { root.reaper-setup-requested(); } }
             MenuItem { title: root.chinese ? "全局设置…" : "Global settings…"; enabled: root.menu-ready; activated => { root.open-global-settings(1); } }
             MenuSeparator { }
             MenuItem { title: root.chinese ? "通用与界面…" : "General and interface…"; activated => { root.open-global-settings(1); } }
@@ -3193,6 +3201,13 @@ export component AppWindow inherits Window {
         // Editors and keyboard-focused buttons handle Space first. A slider can
         // keep its own focus for arrow keys and let Space fall through here.
         key-pressed(event) => {
+            if (event.text == "s" || event.text == "S") && root.menu-ready && !root.background-blocked
+                && root.reaper-send-ready && !root.reaper-busy && !root.wave-selection-gesture
+                && !event.modifiers.alt && !event.modifiers.control && !event.modifiers.meta
+            {
+                if !event.repeat { root.reaper-send-requested(); }
+                return accept;
+            }
             if event.text == " " && root.menu-ready && !root.background-blocked
                 && root.audio-ready && !root.wave-selection-gesture
                 && !event.modifiers.alt && !event.modifiers.control && !event.modifiers.meta
@@ -4042,6 +4057,9 @@ main-scroll := ScrollView {
             resized(value) => { root.resize-audition(min(-value, audition-workspace.available-dock-height)); }
         }
         audition := AuditionPanel {
+            reaper-supported: root.reaper-supported; reaper-ready: root.reaper-send-ready;
+            reaper-busy: root.reaper-busy; reaper-blocked: !root.menu-ready || root.background-blocked || root.wave-selection-gesture;
+            reaper-auto-focus <=> root.reaper-auto-focus; reaper-send => { root.reaper-send-requested(); }
             display-gain <=> root.peak-gain;
             display-gain-changed => { root.peak-style-requested(); }
             x: 0px; y: parent.height - self.height; width: parent.width;
@@ -4939,6 +4957,9 @@ main-scroll := ScrollView {
             resized(value) => { root.resize-audition(min(-value, studio-audition-workspace.available-dock-height)); }
         }
         studio-audition := AuditionPanel {
+            reaper-supported: root.reaper-supported; reaper-ready: root.reaper-send-ready;
+            reaper-busy: root.reaper-busy; reaper-blocked: !root.menu-ready || root.background-blocked || root.wave-selection-gesture;
+            reaper-auto-focus <=> root.reaper-auto-focus; reaper-send => { root.reaper-send-requested(); }
             display-gain <=> root.peak-gain;
             display-gain-changed => { root.peak-style-requested(); }
             x: 0px; y: parent.height - self.height; width: parent.width;

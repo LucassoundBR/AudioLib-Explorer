@@ -324,6 +324,15 @@ impl Drop for DragBusy {
     }
 }
 
+struct ReaperBusy(Arc<Controller>);
+
+impl Drop for ReaperBusy {
+    fn drop(&mut self) {
+        self.0.drag_busy.store(false, Ordering::Release);
+        post(self.0.ui.clone(), |ui| ui.set_reaper_busy(false));
+    }
+}
+
 /// Presentation phases do not change the selected source/range or audio state.
 #[repr(i32)]
 enum ExportFeedback {
@@ -369,6 +378,30 @@ impl Controller {
             })
     }
     pub(super) fn bind_wave_selection(self: &Arc<Self>, ui: &AppWindow) {
+        ui.set_reaper_supported(cfg!(windows));
+        let c = self.clone();
+        ui.on_reaper_send_requested(move || c.send_to_reaper());
+        let c = self.clone();
+        ui.on_reaper_setup_requested(move || {
+            let root = c.config.lock().unwrap().data_root().join("reaper-bridge");
+            let c = c.clone();
+            std::thread::spawn(
+                move || match audiolib_windows::export_reaper_extension(&root) {
+                    Ok(path) => {
+                        let info = c.localized(
+                            "关闭 REAPER 后将 DLL 复制到 UserPlugins，再重新启动",
+                            "Close REAPER, copy the DLL to UserPlugins, then reopen REAPER",
+                        );
+                        if let Err(error) = audiolib_windows::reveal_path(&path) {
+                            c.status(format!("{info}: {} ({error})", path.display()));
+                        } else {
+                            c.status(info.into());
+                        }
+                    }
+                    Err(error) => c.status(error),
+                },
+            );
+        });
         for preview in [true, false] {
             let c = self.clone();
             std::thread::Builder::new()
@@ -423,6 +456,100 @@ impl Controller {
                 }
             });
         }
+    }
+
+    fn send_to_reaper(self: &Arc<Self>) {
+        let Some(ui) = self.ui.upgrade() else {
+            return;
+        };
+        if !cfg!(windows)
+            || !self.available()
+            || ui.get_background_blocked()
+            || self.wave_selection_gesture.load(Ordering::Acquire)
+            // The current render has one staging path. Send and drag must
+            // serialize its publication through the same worker guard.
+            || self.drag_busy.swap(true, Ordering::AcqRel)
+        {
+            return;
+        }
+        let busy = ReaperBusy(self.clone());
+        let (selection, ready) = {
+            let state = self.slice.lock().unwrap();
+            (state.selection.clone(), state.ready.clone())
+        };
+        if selection.is_some() && ready.is_none() {
+            self.status(
+                self.localized(
+                    "切片仍在准备",
+                    "Wait for the selected WAV to finish preparing",
+                )
+                .into(),
+            );
+            return;
+        }
+        let file = self.selected.lock().unwrap().clone();
+        let source = file.as_ref().map(|file| WaveSource::capture(self, file));
+        let focus = ui.get_reaper_auto_focus();
+        ui.set_reaper_busy(true);
+        ui.set_status(self.localized("正在发送到 REAPER…", "Sending to REAPER…"));
+        let worker = Worker::new(self);
+        let c = self.clone();
+        std::thread::spawn(move || {
+            let _worker = worker;
+            let _busy = busy;
+            let result = (|| -> Result<String, String> {
+                let destination = audiolib_windows::NativeReaper::discover()?;
+                if let (Some(selection), Some(ready)) = (selection.as_ref(), ready) {
+                    if !c.selection_current(selection) || ready.original.changed() {
+                        return Err("The selection changed; select the range again".into());
+                    }
+                    selection.source.check_local_version()?;
+                    let mut published = ready.publish(selection)?;
+                    if !c.selection_current(selection) {
+                        return Err("The selection changed; send it again".into());
+                    }
+                    // REAPER may still reference this file if acknowledgement is lost.
+                    published.keep = true;
+                    destination.send(&published.path, &c.closing)
+                } else {
+                    let source = source.ok_or("Select an audio file first")?;
+                    if source.file.missing
+                        || !c.drag_request_current(
+                            source.source_generation,
+                            source.library_generation,
+                            &c.closing,
+                        )
+                    {
+                        return Err("The original audio is no longer available".into());
+                    }
+                    if source.remote {
+                        return Err("Select a waveform region to send audio from the server".into());
+                    }
+                    let roots = c.config.lock().unwrap().allowed_scan_roots.clone();
+                    let path = audiolib_core::validate_audio_path(
+                        Path::new(&source.file.file_path),
+                        &roots,
+                    )
+                    .map_err(|error| error.to_string())?;
+                    destination.send(&path, &c.closing)
+                }
+            })();
+            post(c.ui.clone(), move |ui| match result {
+                Ok(window) => {
+                    let status = if focus && !ui.get_closing() {
+                        match audiolib_windows::focus_reaper(&window) {
+                            Ok(true) => "Sent to REAPER",
+                            Ok(false) => "Sent to REAPER · Windows did not allow focus switching",
+                            Err(_) => "Sent to REAPER · Auto-Focus unavailable",
+                        }
+                    } else {
+                        "Sent to REAPER"
+                    };
+                    ui.set_status(status.into());
+                }
+                Err(error) => ui.set_status(error.into()),
+            });
+        });
     }
 
     pub(super) fn publish_wave_source(&self, ui: &AppWindow, source: &WaveSource) -> bool {

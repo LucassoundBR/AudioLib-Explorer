@@ -1,6 +1,6 @@
 // app/audiolib-desktop/ui/audition-panel.slint
 import { ComboBox, Slider as NativeSlider } from "std-widgets.slint";
-import { Theme, ThemedSlider as Slider } from "theme.slint";
+import { Theme, ThemedCheckBox, ThemedSlider as Slider } from "theme.slint";
 
 /// One time-ruler tick: its position as a fraction of the visible range and, on
 /// major ticks, the time label drawn beside it.
@@ -917,6 +917,31 @@ component ClassicTool inherits Rectangle {
         show: root.tip-ready && !hit.pressed && !root.keyboard-held;
     }
 }
+component ReaperTools inherits HorizontalLayout {
+    in property <bool> chinese;
+    in property <bool> ready;
+    in property <bool> busy;
+    in property <bool> blocked;
+    in-out property <bool> auto-focus;
+    callback send();
+    height: 30px * Theme.ui-scale;
+    spacing: 5px * Theme.ui-scale;
+    ClassicTool {
+        icon: @image-url("icons/export.svg");
+        label: root.chinese ? "发送到 REAPER" : "Send to REAPER";
+        hint: root.busy ? (root.chinese ? "正在发送" : "Sending") : "S";
+        enabled: root.ready && !root.busy && !root.blocked;
+        clicked => { root.send(); }
+    }
+    ThemedCheckBox {
+        text: "Auto-Focus"; text-module: 4; surface: Theme.player;
+        width: Theme.font(12) * 7.8 + 24px * Theme.ui-scale;
+        height: root.height;
+        description: root.chinese ? "发送后切换到 REAPER" : "Bring REAPER to the foreground after sending";
+        checked <=> root.auto-focus; enabled: !root.blocked && !root.busy;
+    }
+}
+
 // Both players offer discrete monitoring only when the source and output support it.
 component MonitorModeButton inherits ClassicTool {
     in property <bool> chinese;
@@ -1290,6 +1315,12 @@ component WaveSelectionOverlay inherits Rectangle {
 }
 
 component ClassicAuditionPanel inherits Rectangle {
+    in property <bool> reaper-supported;
+    in property <bool> reaper-ready;
+    in property <bool> reaper-busy;
+    in property <bool> reaper-blocked;
+    in-out property <bool> reaper-auto-focus;
+    callback reaper-send();
     in property <bool> compact: false;
     in property <bool> spectral: true;
     in-out property <float> display-gain: 0;
@@ -1514,6 +1545,12 @@ component ClassicAuditionPanel inherits Rectangle {
                 chinese: root.chinese; mono: root.mono; stereo-pair: root.stereo-pair;
                 source-channels: root.monitor-source-channels; output-channels: root.monitor-output-channels;
                 select-mode(mono, pair) => { root.mono = mono; root.stereo-pair = pair; root.transform(root.pitch-text, root.rate-text, mono, root.repeat); }
+            }
+            if root.reaper-supported: ReaperTools {
+                y: (parent.height - self.height) / 2;
+                chinese: root.chinese; ready: root.reaper-ready; busy: root.reaper-busy; blocked: root.reaper-blocked;
+                auto-focus <=> root.reaper-auto-focus;
+                send => { root.reaper-send(); }
             }
             Rectangle { horizontal-stretch: 1; }
             OutputPill {
@@ -2199,6 +2236,12 @@ component WorkbenchAuditionPanel inherits Rectangle {
 }
 
 export component AuditionPanel inherits Rectangle {
+    in property <bool> reaper-supported;
+    in property <bool> reaper-ready;
+    in property <bool> reaper-busy;
+    in property <bool> reaper-blocked;
+    in-out property <bool> reaper-auto-focus;
+    callback reaper-send();
     in-out property <float> display-gain: 0;
     callback display-gain-changed();
     // Inactive facades keep their shared bindings without creating input owners.
@@ -2336,6 +2379,10 @@ export component AuditionPanel inherits Rectangle {
     height: Theme.modern-player ? 114px * (root.expanded ? Theme.max-audition-height-factor : 1) * Theme.ui-scale
         : (root.compact ? 176px : 204px) * Theme.ui-scale;
     if root.active && !Theme.modern-player: ClassicAuditionPanel {
+        reaper-supported: root.reaper-supported; reaper-ready: root.reaper-ready;
+        reaper-busy: root.reaper-busy; reaper-blocked: root.reaper-blocked;
+        reaper-auto-focus <=> root.reaper-auto-focus;
+        reaper-send => { root.reaper-send(); }
         display-gain <=> root.display-gain;
         display-gain-changed => { root.display-gain-changed(); }
         width: parent.width; height: parent.height;
