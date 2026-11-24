@@ -1,5 +1,5 @@
 // app/audiolib-desktop/ui/audition-panel.slint
-import { ComboBox } from "std-widgets.slint";
+import { ComboBox, Slider as NativeSlider } from "std-widgets.slint";
 import { Theme, ThemedSlider as Slider } from "theme.slint";
 
 /// One time-ruler tick: its position as a fraction of the visible range and, on
@@ -24,6 +24,13 @@ global Clock {
 }
 
 // A delayed hint beside its anchor. Paint-only: it never takes pointer input.
+global DisplayGain {
+    public pure function label(gain: float) -> string {
+        let whole = round(gain);
+        return (whole > 0 ? "+" : "") + whole + " dB";
+    }
+}
+
 component Tip inherits Rectangle {
     in property <string> text;
     in property <bool> show;
@@ -341,6 +348,8 @@ component TransformField inherits Rectangle {
     private property <float> minimum: root.pitch ? -2400 : 0.25;
     private property <float> maximum: root.pitch ? 2400 : 4;
     private property <float> current: root.pitch ? round(root.text.to-float() * 100) : root.text.to-float();
+    private property <float> inline-value: root.current;
+    changed current => { root.inline-value = root.current; }
     private property <string> unit: root.pitch ? "ct" : "×";
     private property <string> title: root.pitch ? (root.chinese ? "音高" : "Pitch") : (root.chinese ? "速度" : "Rate");
     out property <bool> modified: root.current != (root.pitch ? 0 : 1);
@@ -386,7 +395,8 @@ component TransformField inherits Rectangle {
     }
     changed enabled => { if !root.enabled { popup.close(); } }
     // Reserve enough space for the full range while the value is changing.
-    width: title-text.preferred-width + widest-number.preferred-width + unit-text.preferred-width + 19px * Theme.ui-scale;
+    width: title-text.preferred-width + widest-number.preferred-width + unit-text.preferred-width + 19px * Theme.ui-scale
+        + (Theme.default-lucas ? 78px * Theme.ui-scale : 0px);
     height: max(22px * Theme.ui-scale, Theme.font(12) + 8px * Theme.ui-scale);
     border-radius: 3px * Theme.ui-scale; border-width: 1phx;
     border-color: rejection-feedback.running ? Theme.warning : trigger.has-focus ? Theme.accent : transparent;
@@ -401,9 +411,20 @@ component TransformField inherits Rectangle {
     }
     widest-number := Text { visible: false; text: root.pitch ? "-8888" : "8.88"; font-size: Theme.font(12); font-weight: 600; }
     title-text := Caption { x: 6px * Theme.ui-scale; width: self.preferred-width; text: root.title; }
-    number := Text {
+    inline-slider := TransformSlider {
+        visible: Theme.default-lucas; enabled: Theme.default-lucas && root.enabled;
         x: title-text.x + title-text.width + 5px * Theme.ui-scale;
-        width: widest-number.preferred-width; text: root.formatted(root.current);
+        y: (parent.height - self.height) / 2;
+        width: 73px * Theme.ui-scale; height: parent.height;
+        surface: transparent; input-label: root.label;
+        minimum: root.minimum; maximum: root.maximum; step: root.pitch ? 1 : 0.01;
+        reset-value: root.pitch ? 0 : 1;
+        value <=> root.inline-value;
+        released(value) => { root.apply(root.formatted(value)); }
+    }
+    number := Text {
+        x: inline-slider.x + (Theme.default-lucas ? 78px * Theme.ui-scale : 0px);
+        width: widest-number.preferred-width; text: root.formatted(Theme.default-lucas ? root.inline-value : root.current);
         horizontal-alignment: right; vertical-alignment: center; font-size: Theme.font(12); font-weight: 600;
         color: root.modified ? Theme.accent-hover : Theme.ink;
     }
@@ -411,7 +432,10 @@ component TransformField inherits Rectangle {
         x: number.x + number.width + 2px * Theme.ui-scale; width: self.preferred-width;
         text: root.unit; font-size: Theme.font(10);
     }
-    hit := TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { root.open(); } }
+    hit := TouchArea {
+        x: Theme.default-lucas ? number.x : 0px; width: parent.width - self.x;
+        enabled: root.enabled; mouse-cursor: pointer; clicked => { root.open(); }
+    }
     popup := PopupWindow {
         close-policy: close-on-click-outside;
         x: 0px; y: -self.height - 4px * Theme.ui-scale;
@@ -1268,6 +1292,8 @@ component WaveSelectionOverlay inherits Rectangle {
 component ClassicAuditionPanel inherits Rectangle {
     in property <bool> compact: false;
     in property <bool> spectral: true;
+    in-out property <float> display-gain: 0;
+    callback display-gain-changed();
     in property <bool> chinese;
     in property <bool> selection-active;
     in property <float> selection-start;
@@ -1499,7 +1525,7 @@ component ClassicAuditionPanel inherits Rectangle {
             ClassicTool { icon: @image-url("icons/peaks.svg"); label: root.chinese ? "波形显示设置" : "Peak display settings"; tip-align: 1; clicked => { root.peaks(); } }
         }
         wave-frame := Rectangle { horizontal-stretch: 1; vertical-stretch: 1; min-height: (root.compact ? 45px : 70px) * Theme.ui-scale;
-            wave := Rectangle { x: 0px; y: 0px; width: parent.width; height: parent.height; background: root.spectral && root.waveform-ready ? Theme.spectral-canvas : Theme.normal-canvas; border-color: Theme.player-border; border-width: 1px; clip: true;
+            wave := Rectangle { x: 0px; y: 0px; width: parent.width - (Theme.default-lucas ? gain-lane.width : 0px); height: parent.height; background: Theme.default-lucas ? #b5bfc3 : root.spectral && root.waveform-ready ? Theme.spectral-canvas : Theme.normal-canvas; border-color: Theme.player-border; border-width: 1px; clip: true;
                 accessible-role: groupbox; accessible-label: root.chinese ? "波形时间轴" : "Waveform timeline";
                 property <float> played-fraction: root.duration > 0 ? clamp((root.visual-position - root.shown-start) / max(0.001, root.shown-end - root.shown-start), 0, 1) : 0;
                 changed width => { root.resize(self.width / 1px, self.height / 1px); }
@@ -1515,14 +1541,15 @@ component ClassicAuditionPanel inherits Rectangle {
                 }
                 if !root.waveform-ready: Text { text: root.busy || root.missing || root.state == 1 || root.state == 7 ? root.unavailable : root.ready ? (root.spectral ? (root.chinese ? "正在分析频谱峰值…" : "Analyzing spectral peaks…") : (root.chinese ? "正在分析波形…" : "Analyzing waveform…")) : (root.play-on-single-click ? (root.chinese ? "单击声音即可试听" : "Click a sound to audition") : (root.chinese ? "选择声音查看波形 · 双击试听" : "Select a sound to view its waveform · Double-click to audition")); color: Theme.text(4, 1, Theme.dim); horizontal-alignment: center; vertical-alignment: center; font-size: Theme.font(11); }
                 // These overlays are paint-only, leaving click/scroll ownership to scrub.
-                if root.ready && root.duration > 0: PlayedRegion {
+                if !Theme.default-lucas && root.ready && root.duration > 0: PlayedRegion {
                     x: 0px; y: 0px; width: parent.width; height: parent.height;
                     fraction: wave.played-fraction; position: root.position; duration: root.duration; chinese: root.chinese;
                     tint: root.spectral ? #183c3428 : #8faea622;
                 }
                 if root.ready && root.duration > 0 && root.visual-position >= root.shown-start && root.visual-position <= root.shown-end: Rectangle {
-                    x: wave.played-fraction * (parent.width - 1px); width: 1px;
-                    background: root.spectral ? #f4faf7 : Theme.accent-hover;
+                    width: Theme.default-lucas ? 2px * Theme.ui-scale : 1px;
+                    x: wave.played-fraction * (parent.width - self.width);
+                    background: Theme.default-lucas ? #233b38 : root.spectral ? #f4faf7 : Theme.accent-hover;
                 }
                 if scrub.hovered && !scrub.gesture && root.shown-end > root.shown-start && (root.ready || root.waveform-ready): WaveHoverGuide {
                     width: parent.width; height: parent.height; pointer-x: scrub.pointer-x;
@@ -1532,7 +1559,7 @@ component ClassicAuditionPanel inherits Rectangle {
 
             }
             wave-keys := FocusScope {
-                x: 0px; y: 0px; width: parent.width; height: parent.height;
+                x: 0px; y: 0px; width: wave.width; height: wave.height;
                 focus-on-tab-navigation: root.ready || (root.waveform-ready && root.selection-identity != "" && !root.busy); focus-on-click: false;
                 key-pressed(event) => {
                     if !root.ready { return reject; }
@@ -1576,8 +1603,22 @@ component ClassicAuditionPanel inherits Rectangle {
                         pointer-feedback-changed => { root.selection-pointer-feedback-changed(); }
                     }
             }
+            gain-lane := VerticalLayout {
+                visible: Theme.default-lucas;
+                x: wave.width; y: 0px; width: 48px * Theme.ui-scale; height: wave.height;
+                padding: 2px * Theme.ui-scale; spacing: 2px * Theme.ui-scale;
+                Caption { height: 14px * Theme.ui-scale; text: DisplayGain.label(root.display-gain); horizontal-alignment: center; font-size: Theme.font(9); }
+                NativeSlider {
+                    orientation: vertical; horizontal-stretch: 0; vertical-stretch: 1;
+                    accessible-label: root.chinese ? "波形显示增益" : "Waveform display gain";
+                    enabled: Theme.default-lucas;
+                    minimum: -12; maximum: 36; step: 1;
+                    value <=> root.display-gain;
+                    changed => { root.display-gain-changed(); }
+                }
+            }
         }
-        Rectangle { height: max(24px * Theme.ui-scale, 10px * Theme.ui-scale + Theme.font(10)); accessible-role: groupbox; accessible-label: root.chinese ? "波形时间尺" : "Waveform time ruler";
+        if !Theme.default-lucas: Rectangle { height: max(24px * Theme.ui-scale, 10px * Theme.ui-scale + Theme.font(10)); accessible-role: groupbox; accessible-label: root.chinese ? "波形时间尺" : "Waveform time ruler";
             property <int> label-stride: self.width >= Theme.font(9) * 80 ? 1 : self.width >= Theme.font(9) * 40 ? 2 : 5;
             for tick in 51: Rectangle { y: 0px; x: tick * (parent.width - 1px) / 50; width: 1px; height: (Math.mod(tick,5) == 0 ? 6px : 3px) * Theme.ui-scale; background: Theme.muted; }
             for index in 11: Text { visible: Math.mod(index, parent.label-stride) == 0; width: min(self.preferred-width, parent.width * parent.label-stride / 15); x: clamp(index * (parent.width - 1px)/10 - self.width / 2, 0px, parent.width - self.width); y: 8px * Theme.ui-scale; height: parent.height - self.y; overflow: elide; text: root.ruler-label(index); color: Theme.text(4, 1, Theme.dim); font-size: Theme.font(9); horizontal-alignment: index == 10 ? right : left; }
@@ -1586,7 +1627,7 @@ component ClassicAuditionPanel inherits Rectangle {
                 scroll-event(event) => { return root.wheel-zoom(event.delta-y, self.mouse-x / max(1px,self.width)); }
             }
         }
-        HorizontalLayout { height: 16px * Theme.ui-scale; spacing: 7px * Theme.ui-scale;
+        if !Theme.default-lucas: HorizontalLayout { height: 16px * Theme.ui-scale; spacing: 7px * Theme.ui-scale;
             Caption { width: 42px * Theme.ui-scale; text: Math.round(root.zoom * 10) / 10 + "×"; font-size: Theme.font(10); }
             if root.ready: Caption { text: root.chinese ? "滚轮缩放" : "Scroll to zoom"; font-size: Theme.font(9); }
             Slider { input-label: root.chinese ? "波形可视范围" : "Visible waveform range"; horizontal-stretch: 1; minimum: 0; maximum: 1; step: 0.005; enabled: root.waveform-progress >= 1 && root.ready && root.zoom > 1; value <=> root.scroll; changed => { root.pan(self.value); } }
@@ -2158,6 +2199,8 @@ component WorkbenchAuditionPanel inherits Rectangle {
 }
 
 export component AuditionPanel inherits Rectangle {
+    in-out property <float> display-gain: 0;
+    callback display-gain-changed();
     // Inactive facades keep their shared bindings without creating input owners.
     in property <bool> active: true;
     private property <length> presenter-min-width: 0px;
@@ -2293,6 +2336,8 @@ export component AuditionPanel inherits Rectangle {
     height: Theme.modern-player ? 114px * (root.expanded ? Theme.max-audition-height-factor : 1) * Theme.ui-scale
         : (root.compact ? 176px : 204px) * Theme.ui-scale;
     if root.active && !Theme.modern-player: ClassicAuditionPanel {
+        display-gain <=> root.display-gain;
+        display-gain-changed => { root.display-gain-changed(); }
         width: parent.width; height: parent.height;
         compact: root.compact;
         spectral: root.spectral;
@@ -2481,7 +2526,7 @@ export component PeakSettings inherits FocusScope {
     in-out property <float> noise: 1;
     in-out property <float> variance: 0.38;
     callback changed(); callback close();
-    Rectangle { background: Theme.overlay;
+    Rectangle {
     TouchArea { }
     Rectangle { width: 480px * Theme.ui-scale; height: 384px * Theme.ui-scale; x: (parent.width - self.width)/2; y: (parent.height - self.height)/2; background: Theme.panel; border-radius: 8px * Theme.ui-scale; border-width: 1px; border-color: Theme.strong-border;
         VerticalLayout { padding: 20px * Theme.ui-scale; spacing: 12px * Theme.ui-scale;
@@ -2508,7 +2553,7 @@ export component PeakSettings inherits FocusScope {
             HorizontalLayout { height: 30px * Theme.ui-scale; spacing: 12px * Theme.ui-scale;
                 Caption { width: 90px * Theme.ui-scale; text: root.chinese ? "显示增益" : "Display gain"; }
                 Slider { surface: Theme.panel; horizontal-stretch: 1; minimum: -12; maximum: 36; step: 1; value <=> root.gain-db; changed => { root.changed(); } }
-                Caption { width: 60px * Theme.ui-scale; text: root.gain-db + " dB"; horizontal-alignment: right; }
+                Caption { width: 60px * Theme.ui-scale; text: DisplayGain.label(root.gain-db); horizontal-alignment: right; }
             }
             HorizontalLayout { height: 30px * Theme.ui-scale; spacing: 12px * Theme.ui-scale;
                 Caption { width: 90px * Theme.ui-scale; text: root.chinese ? "显示模式" : "Display"; }

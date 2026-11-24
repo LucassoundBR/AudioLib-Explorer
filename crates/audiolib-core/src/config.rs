@@ -609,6 +609,8 @@ pub const STUDIO_THEME: &str = "studio";
 pub const DEFAULT_V2_THEME: &str = "default-v2";
 /// Identifier of the Classic workbench and player with the v1.0.3 default palette.
 pub const JADE_CLASSIC_THEME: &str = "jade-classic";
+/// Classic presentation customized for the Lucas audition workflow.
+pub const DEFAULT_LUCAS_THEME: &str = "default-lucas";
 
 /// Library workbench presentation selected independently of audition controls.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -643,7 +645,7 @@ pub struct BuiltinTheme {
 }
 
 /// Single registry of shipped themes, with the default first.
-pub const BUILTIN_THEMES: [BuiltinTheme; 7] = [
+pub const BUILTIN_THEMES: [BuiltinTheme; 8] = [
     BuiltinTheme {
         id: DEFAULT_THEME,
         name: "Default",
@@ -690,6 +692,13 @@ pub const BUILTIN_THEMES: [BuiltinTheme; 7] = [
         id: JADE_CLASSIC_THEME,
         name: "Jade Classic",
         name_cn: "青碧经典",
+        workbench_style: WorkbenchStyle::Classic,
+        player_style: PlayerStyle::Classic,
+    },
+    BuiltinTheme {
+        id: DEFAULT_LUCAS_THEME,
+        name: "Default Lucas",
+        name_cn: "Default Lucas",
         workbench_style: WorkbenchStyle::Classic,
         player_style: PlayerStyle::Classic,
     },

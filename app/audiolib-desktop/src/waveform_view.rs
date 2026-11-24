@@ -4,6 +4,7 @@ use audiolib_audio::{SPECTRAL_PEAK_BASE, WaveformData, spectral_color};
 
 const SPECTRAL_BACKGROUND: [u8; 4] = [132, 144, 148, 255];
 const NORMAL_BACKGROUND: [u8; 4] = [29, 35, 40, 255];
+const LIGHT_BACKGROUND: [u8; 4] = [181, 191, 195, 255];
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct WaveView {
@@ -14,6 +15,7 @@ pub(crate) struct WaveView {
     pub noise: f32,
     pub variance: f32,
     pub spectral: bool,
+    pub light_canvas: bool,
 }
 impl Default for WaveView {
     fn default() -> Self {
@@ -25,6 +27,7 @@ impl Default for WaveView {
             noise: 1.0,
             variance: 0.38,
             spectral: true,
+            light_canvas: false,
         }
     }
 }
@@ -219,7 +222,9 @@ pub(crate) fn render_waveform_layers(
     studio: bool,
 ) -> (WavePixels, Option<WavePixels>) {
     let count = width as usize * height as usize;
-    let background = if view.spectral {
+    let background = if view.light_canvas {
+        LIGHT_BACKGROUND
+    } else if view.spectral {
         SPECTRAL_BACKGROUND
     } else {
         NORMAL_BACKGROUND
@@ -274,6 +279,8 @@ pub(crate) fn render_waveform_layers(
                 .clamp(top as f32, bottom as f32) as u32;
             let rgb = if view.spectral {
                 spectral_color(peak.dominant_hz, peak.tonality, view.noise, view.variance)
+            } else if view.light_canvas {
+                [49, 72, 72]
             } else {
                 [143, 174, 166]
             };

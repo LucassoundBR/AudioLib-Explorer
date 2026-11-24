@@ -1,7 +1,7 @@
 // app/audiolib-desktop/src/studio_theme_tests.rs
 //! Studio dock regressions use synthetic images and an isolated software backend.
 use crate::{AppWindow, AudioRow, FolderRow, theme::apply_theme};
-use audiolib_core::config::{DEFAULT_THEME, DEFAULT_V2_THEME, STUDIO_THEME};
+use audiolib_core::config::{DEFAULT_LUCAS_THEME, DEFAULT_THEME, DEFAULT_V2_THEME, STUDIO_THEME};
 use i_slint_backend_testing::{ElementHandle, TestingBackend, TestingBackendOptions};
 use slint::{
     ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel,
@@ -78,6 +78,76 @@ fn activate(ui: &AppWindow, label: &str) {
         .unwrap_or_else(|| panic!("Missing action: {label}"));
     assert_eq!(action.accessible_enabled(), Some(true), "{label}");
     action.invoke_accessible_default_action();
+}
+
+#[test]
+fn default_lucas_keeps_shared_peak_gain_and_adds_inline_transforms() {
+    use crate::waveform_view::{WaveView, render_waveform_layers};
+    use audiolib_audio::{WaveformData, WaveformPeak};
+    use i_slint_backend_testing::AccessibleRole;
+
+    init_backend();
+    let ui = fixture(false);
+    apply_theme(&ui, DEFAULT_LUCAS_THEME);
+    let lane = (0..100)
+        .map(|index| {
+            let envelope = (index % 21) as f32 / 21.0;
+            WaveformPeak {
+                min: -envelope * 0.8,
+                max: envelope,
+                rms: envelope * 0.25,
+                dominant_hz: 219.0,
+                tonality: 0.52,
+                ..Default::default()
+            }
+        })
+        .collect::<Vec<_>>();
+    let data = WaveformData {
+        sample_rate: 48000,
+        channels: 2,
+        frames: 4800000,
+        samples_per_pixel: 48000,
+        peaks: vec![lane.clone(), lane],
+    };
+    let present = |light_canvas| {
+        let view = WaveView {
+            light_canvas,
+            ..WaveView::default()
+        };
+        let (pixels, _) = render_waveform_layers(&data, 1230, 120, view, false);
+        if light_canvas {
+            assert_eq!(&pixels.as_bytes()[..4], &[181, 191, 195, 255]);
+        }
+        ui.set_waveform_image(Image::from_rgba8(pixels));
+    };
+    present(true);
+    ui.show().unwrap();
+    frame(&ui, "default-lucas");
+
+    let slider = |label| {
+        ElementHandle::find_by_accessible_label(&ui, label)
+            .find(|element| element.accessible_role() == Some(AccessibleRole::Slider))
+    };
+    let gain = slider("Waveform display gain").expect("visible vertical gain");
+    ui.set_peak_gain(6.0);
+    assert_eq!(gain.accessible_value().as_deref(), Some("6"));
+
+    let pitch = slider("Adjust pitch").expect("inline Pitch slider");
+    pitch.set_accessible_value("125");
+    assert_eq!(ui.get_pitch_text(), "1.25");
+    assert_eq!(ui.get_speed_text(), "0.80");
+
+    activate(&ui, "Peak display settings");
+    frame(&ui, "default-lucas-peak-settings");
+    assert!(ui.get_peaks_visible());
+    assert_eq!(ui.get_peak_gain(), 6.0);
+    ui.set_peaks_visible(false);
+    apply_theme(&ui, DEFAULT_THEME);
+    present(false);
+    frame(&ui, "upstream-default");
+    assert!(slider("Adjust pitch").is_none());
+    assert!(slider("Waveform display gain").is_none());
+    ui.hide().unwrap();
 }
 
 fn player_actions(ui: &AppWindow, label: &str) -> Vec<ElementHandle> {

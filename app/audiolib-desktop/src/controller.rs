@@ -20,7 +20,8 @@ use audiolib_audio::{
     PlaybackConfig, PlaybackState, RatePolicy, WaveformRequest,
 };
 use audiolib_core::config::{
-    AppConfig, AudioTablePreferences, STUDIO_THEME, UI_SCALE_PERCENTS, normalize_ui_scale_percent,
+    AppConfig, AudioTablePreferences, DEFAULT_LUCAS_THEME, STUDIO_THEME, UI_SCALE_PERCENTS,
+    normalize_ui_scale_percent,
 };
 use audiolib_core::{
     Album, AlbumKind, AudioFile, BatchMetadataRequest, DataProvider, FileVisibility, Folder,
@@ -1478,7 +1479,11 @@ impl Controller {
         ui.on_theme_requested(move |index| {
             let id = crate::theme::theme_id(index);
             let studio = id == STUDIO_THEME;
-            let changed = *c.theme.lock().unwrap() != id;
+            let repaint = {
+                let current = c.theme.lock().unwrap();
+                *current != id
+                    && (studio || id == DEFAULT_LUCAS_THEME || *current == DEFAULT_LUCAS_THEME)
+            };
             let ui = c.ui.upgrade();
             if let Some(ui) = &ui {
                 crate::theme::apply_theme(ui, &id);
@@ -1489,8 +1494,7 @@ impl Controller {
             *c.theme.lock().unwrap() = id;
             // The default renderer does not build Studio's progress mask. Refresh
             // the current viewport on entry, including a selected but idle sound.
-            if changed
-                && studio
+            if repaint
                 && let Some(ui) = ui
                 && let Some(file) =
                     c.waveform_refresh_file(&c.audio.status(), ui.get_waveform_ready())
@@ -5937,8 +5941,15 @@ impl Controller {
         }
         let job = job.clone();
         let c2 = self.clone();
-        let studio = *self.theme.lock().unwrap() == STUDIO_THEME;
-        let (pixels, mask) = render_waveform_layers(data, job.width, job.height, job.view, studio);
+        let (studio, light_canvas) = {
+            let theme = self.theme.lock().unwrap();
+            (*theme == STUDIO_THEME, *theme == DEFAULT_LUCAS_THEME)
+        };
+        let view = WaveView {
+            light_canvas,
+            ..job.view
+        };
+        let (pixels, mask) = render_waveform_layers(data, job.width, job.height, view, studio);
         let info = format!(
             "{} ch · {:.1} kHz · {}",
             data.channels,

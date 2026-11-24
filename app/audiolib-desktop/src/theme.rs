@@ -5,8 +5,8 @@
 //! with the interface scale.
 use crate::AppWindow;
 use audiolib_core::config::{
-    BUILTIN_THEMES, DEFAULT_THEME, DEFAULT_V2_THEME, JADE_CLASSIC_THEME, PlayerStyle, THEME_IDS,
-    WorkbenchStyle, clamp_font_size, normalize_theme,
+    BUILTIN_THEMES, DEFAULT_LUCAS_THEME, DEFAULT_THEME, DEFAULT_V2_THEME, JADE_CLASSIC_THEME,
+    PlayerStyle, THEME_IDS, WorkbenchStyle, clamp_font_size, normalize_theme,
 };
 use slint::{Color, ComponentHandle, Image, ModelRc, SharedString, VecModel};
 
@@ -386,6 +386,7 @@ pub(crate) fn apply_theme(ui: &AppWindow, id: &str) {
     }
     theme.set_modern_style(modern_style);
     theme.set_modern_player(modern_player);
+    theme.set_default_lucas(entry.id == DEFAULT_LUCAS_THEME);
     theme.set_classic_accent_controls(entry.id == JADE_CLASSIC_THEME);
     theme.set_tinted_surfaces(tinted_surfaces);
     theme.set_pure_black_workspace(entry.id == "obsidian");

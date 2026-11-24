@@ -4042,6 +4042,8 @@ main-scroll := ScrollView {
             resized(value) => { root.resize-audition(min(-value, audition-workspace.available-dock-height)); }
         }
         audition := AuditionPanel {
+            display-gain <=> root.peak-gain;
+            display-gain-changed => { root.peak-style-requested(); }
             x: 0px; y: parent.height - self.height; width: parent.width;
             selection-active: root.wave-selection-active; selection-start: root.wave-selection-start; selection-end: root.wave-selection-end;
             selection-identity: root.wave-selection-identity; selection-preparing: root.wave-selection-preparing; selection-progress: root.wave-selection-progress;
@@ -4937,6 +4939,8 @@ main-scroll := ScrollView {
             resized(value) => { root.resize-audition(min(-value, studio-audition-workspace.available-dock-height)); }
         }
         studio-audition := AuditionPanel {
+            display-gain <=> root.peak-gain;
+            display-gain-changed => { root.peak-style-requested(); }
             x: 0px; y: parent.height - self.height; width: parent.width;
             selection-active: root.wave-selection-active; selection-start: root.wave-selection-start; selection-end: root.wave-selection-end;
             selection-identity: root.wave-selection-identity; selection-preparing: root.wave-selection-preparing; selection-progress: root.wave-selection-progress;
