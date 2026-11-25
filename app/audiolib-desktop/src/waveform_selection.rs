@@ -195,6 +195,7 @@ struct Selection {
     cancel: Arc<AtomicBool>,
     render_cancel: Arc<AtomicBool>,
     preview_cancel: Arc<AtomicBool>,
+    reverse: bool,
 }
 
 impl Selection {
@@ -269,7 +270,12 @@ impl SliceOriginal {
                 return save().map_err(|e| e.to_string());
             }
         };
-        audiolib_audio::export_audio_slice(
+        let export = if selection.reverse {
+            audiolib_audio::export_reversed_audio_slice
+        } else {
+            audiolib_audio::export_audio_slice
+        };
+        export(
             path,
             destination,
             selection.range,
@@ -473,11 +479,18 @@ impl Controller {
             return;
         }
         let busy = ReaperBusy(self.clone());
+        let reverse = self.audio.status().audition.reverse;
+        if ui.get_reverse_pending() || ui.get_confirmed_reverse() != reverse {
+            return;
+        }
         let (selection, ready) = {
             let state = self.slice.lock().unwrap();
             (state.selection.clone(), state.ready.clone())
         };
-        if selection.is_some() && ready.is_none() {
+        if selection
+            .as_ref()
+            .is_some_and(|selection| ready.is_none() || selection.reverse != reverse)
+        {
             self.status(
                 self.localized(
                     "切片仍在准备",
@@ -505,7 +518,9 @@ impl Controller {
                     }
                     selection.source.check_local_version()?;
                     let mut published = ready.publish(selection)?;
-                    if !c.selection_current(selection) {
+                    if !c.selection_current(selection)
+                        || selection.render_cancel.load(Ordering::Acquire)
+                    {
                         return Err("The selection changed; send it again".into());
                     }
                     // REAPER may still reference this file if acknowledgement is lost.
@@ -531,7 +546,12 @@ impl Controller {
                         &roots,
                     )
                     .map_err(|error| error.to_string())?;
-                    destination.send(&path, &c.closing)
+                    if reverse {
+                        let published = c.prepare_reversed_whole_file(&source, &path)?;
+                        destination.send(&published.path, &c.closing)
+                    } else {
+                        destination.send(&path, &c.closing)
+                    }
                 }
             })();
             post(c.ui.clone(), move |ui| match result {
@@ -550,6 +570,36 @@ impl Controller {
                 Err(error) => ui.set_status(error.into()),
             });
         });
+    }
+
+    fn prepare_reversed_whole_file(
+        &self,
+        source: &WaveSource,
+        path: &Path,
+    ) -> Result<PublishedSlice, String> {
+        let export_directory = self.slice_directory().map_err(|error| error.to_string())?;
+        std::fs::create_dir_all(&export_directory).map_err(|error| error.to_string())?;
+        let export_directory = export_directory
+            .canonicalize()
+            .map_err(|error| error.to_string())?;
+        let staging = crate::slice_staging::prepare_staging(&export_directory)
+            .map_err(|error| error.to_string())?;
+        let rendered = staging.directory.path().join("reverse.wav");
+        audiolib_audio::export_reversed_audio_file(path, &rendered, &self.closing, &mut |_, _| {})
+            .map_err(|error| error.to_string())?;
+        if !self.drag_request_current(
+            source.source_generation,
+            source.library_generation,
+            &self.closing,
+        ) {
+            return Err("The original audio is no longer available".into());
+        }
+        let stem = format!("{}-reverse", slice_stem(&source.file.filename));
+        let mut published =
+            publish_numbered_slice(&rendered, &export_directory, &stem, &self.closing)?;
+        // A confirmed or uncertain delivery can leave a permanent REAPER reference.
+        published.keep = true;
+        Ok(published)
     }
 
     pub(super) fn publish_wave_source(&self, ui: &AppWindow, source: &WaveSource) -> bool {
@@ -580,6 +630,7 @@ impl Controller {
         self.slice_render_jobs.clear_pending();
         self.wave_selection_gesture.store(false, Ordering::Release);
         selection_ui_clear(ui);
+        ui.set_wave_source_duration(source.file.duration as f32);
         ui.set_wave_selection_identity(source.key.clone().into());
         self.command(AudioCommand::ClearRange);
         true
@@ -603,6 +654,7 @@ impl Controller {
         self.wave_selection_gesture.store(false, Ordering::Release);
         post(self.ui.clone(), |ui| {
             selection_ui_clear(&ui);
+            ui.set_wave_source_duration(0.0);
             ui.set_wave_selection_identity("".into());
         });
     }
@@ -631,6 +683,33 @@ impl Controller {
                     current.revision == selection.revision
                         && current.source.key == selection.source.key
                 })
+    }
+
+    /// Publish the acknowledged direction and retire incompatible export renders.
+    pub(super) fn publish_confirmed_reverse(self: &Arc<Self>, ui: &AppWindow, reverse: bool) {
+        if ui.get_confirmed_reverse() == reverse {
+            return;
+        }
+        ui.set_confirmed_reverse(reverse);
+        let selection = {
+            let mut state = self.slice.lock().unwrap();
+            let Some(mut selection) = state.selection.clone() else {
+                return;
+            };
+            if selection.reverse == reverse || selection.source.remote {
+                return;
+            }
+            selection.render_cancel.store(true, Ordering::Release);
+            selection.reverse = reverse;
+            selection.render_cancel = Arc::new(AtomicBool::new(false));
+            state.ready = None;
+            state.published = None;
+            state.drag_requested = false;
+            state.selection = Some(selection.clone());
+            selection
+        };
+        show_export_feedback(ui, ExportFeedback::Preparing);
+        self.prepare_wave_slice(selection);
     }
 
     fn slice_directory(&self) -> audiolib_core::Result<PathBuf> {
@@ -735,6 +814,7 @@ impl Controller {
             state.published = None;
             state.drag_requested = false;
             let selection = Selection {
+                reverse: ui.get_confirmed_reverse() && !source.remote,
                 source,
                 range,
                 revision: state.revision,
@@ -920,6 +1000,7 @@ impl Controller {
     }
 
     pub(super) fn seek_wave_selection(self: &Arc<Self>, position: f64) {
+        let status = self.audio.status();
         let range = self
             .slice
             .lock()
@@ -928,7 +1009,11 @@ impl Controller {
             .as_ref()
             .map(|selection| selection.range);
         if range.is_some_and(|range| {
-            position < range.start_seconds() || position >= range.end_seconds()
+            if status.audition.reverse {
+                position <= range.start_seconds() || position > range.end_seconds()
+            } else {
+                position < range.start_seconds() || position >= range.end_seconds()
+            }
         }) {
             self.clear_wave_selection();
         }
@@ -936,7 +1021,6 @@ impl Controller {
         let Some(source) = source else {
             return;
         };
-        let status = self.audio.status();
         let matches = status.file_path.as_deref().is_some_and(|path| {
             if source.remote {
                 self.remote_wave_file(path).is_some_and(|file| {
@@ -1308,7 +1392,11 @@ impl Controller {
                     _directory: directory,
                     path,
                     export_directory,
-                    stem: slice_stem(&selection.source.file.filename),
+                    stem: if selection.reverse {
+                        format!("{}-reverse", slice_stem(&selection.source.file.filename))
+                    } else {
+                        slice_stem(&selection.source.file.filename)
+                    },
                 }))
             })();
             let c2 = c.clone();

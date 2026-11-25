@@ -209,12 +209,70 @@ fn selection(
         cancel: Arc::new(AtomicBool::new(false)),
         render_cancel: Arc::new(AtomicBool::new(false)),
         preview_cancel: Arc::new(AtomicBool::new(false)),
+        reverse: false,
     }
 }
 
 #[test]
 fn displayed_waveform_drives_slice_and_preview_even_with_another_inspector() {
     isolated("child_displayed_source");
+}
+
+#[test]
+fn reverse_replaces_the_prepared_slice_used_by_export_and_reaper() {
+    isolated("child_reverse_prepared_slice");
+}
+
+#[test]
+#[ignore = "isolated Reverse Waveform selection and exact export regression"]
+fn child_reverse_prepared_slice() {
+    let f = fixture();
+    bind_displayed(&f);
+    f.c.commit_wave_selection(0.2, 0.6);
+    let wait_for_render = || {
+        let c = f.c.clone();
+        wait_for(&f.ui, move || {
+            let state = c.slice.lock().unwrap();
+            state.ready.is_some() && state.workers == 0
+        });
+    };
+    wait_for_render();
+    let forward = f.c.slice.lock().unwrap().selection.clone().unwrap();
+    let status =
+        f.c.audio
+            .send_and_wait(AudioCommand::ToggleReverse, Duration::from_secs(4))
+            .unwrap();
+    assert!(status.audition.reverse);
+    f.c.publish_confirmed_reverse(&f.ui, status.audition.reverse);
+    wait_for_render();
+    assert!(forward.render_cancel.load(Ordering::Acquire));
+    let (selection, ready) = {
+        let state = f.c.slice.lock().unwrap();
+        (
+            state.selection.clone().unwrap(),
+            state.ready.clone().unwrap(),
+        )
+    };
+    assert_eq!(selection.range, forward.range);
+    assert!(selection.reverse);
+
+    // The first publish moves the staged file. The second rebuilds it, as when
+    // sending to REAPER after an earlier native drag of this range.
+    for _ in 0..2 {
+        let published = ready.publish(&selection).unwrap();
+        let info = audiolib_audio::probe(&published.path).unwrap();
+        assert_eq!(
+            (info.sample_rate, info.bit_depth, info.frames),
+            (1000, 16, 400)
+        );
+        let bytes = std::fs::read(&published.path).unwrap();
+        let pcm = bytes.windows(4).position(|chunk| chunk == b"data").unwrap() + 8;
+        let samples: Vec<i16> = bytes[pcm..pcm + 800]
+            .chunks_exact(2)
+            .map(|sample| i16::from_le_bytes(sample.try_into().unwrap()))
+            .collect();
+        assert_eq!(samples, (200..600).rev().collect::<Vec<i16>>());
+    }
 }
 
 #[test]

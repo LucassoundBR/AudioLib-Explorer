@@ -1377,6 +1377,8 @@ impl Controller {
     }
 
     fn bind(self: &Arc<Self>, ui: &AppWindow) {
+        ui.on_mirror_waveform(crate::waveform_view::mirror_preview);
+        ui.on_display_ruler(|start, end| ruler_model(f64::from(start), f64::from(end)));
         self.bind_appearance(ui);
         self.bind_search_tasks(ui);
         self.bind_ai_search(ui);
@@ -1966,6 +1968,10 @@ impl Controller {
         });
         let c = self.clone();
         ui.on_transform_requested(move |pitch, rate, mono, repeat| {
+            let Some(ui) = c.ui.upgrade() else { return };
+            if ui.get_reverse_pending() {
+                return;
+            }
             let settings = pitch
                 .trim()
                 .parse::<f32>()
@@ -1975,15 +1981,13 @@ impl Controller {
                     pitch_semitones,
                     rate,
                     mono,
-                    stereo_pair: c
-                        .ui
-                        .upgrade()
-                        .is_some_and(|ui| ui.get_audition_stereo_pair()),
+                    stereo_pair: ui.get_audition_stereo_pair(),
                     loop_enabled: repeat,
+                    reverse: c.audio.status().audition.reverse,
                 });
             if let Some(settings) = settings.filter(|settings| settings.validate().is_ok()) {
                 c.command(AudioCommand::SetAudition(settings));
-            } else if let Some(ui) = c.ui.upgrade() {
+            } else {
                 publish_audition(&ui, c.audio.status().audition);
                 ui.invoke_audition_input_rejected(rejected_audition_fields(&pitch, &rate));
                 c.status(
@@ -1995,6 +1999,37 @@ impl Controller {
                     .into(),
                 );
             }
+        });
+        let c = self.clone();
+        ui.on_reverse_requested(move || {
+            let Some(ui) = c.ui.upgrade() else { return };
+            if !c.available() || !ui.get_reverse_ready() || c.drag_busy.load(Ordering::Acquire) {
+                return;
+            }
+            let completion = match c.audio.enqueue_with_ack(AudioCommand::ToggleReverse) {
+                Ok(completion) => completion,
+                Err(error) => {
+                    ui.set_status(error.to_string().into());
+                    return;
+                }
+            };
+            ui.set_reverse_pending(true);
+            let c = c.clone();
+            std::thread::spawn(move || {
+                let result = completion.wait_until_completed();
+                let controller = c.clone();
+                post(c.ui.clone(), move |ui| {
+                    let status = controller.audio.status();
+                    if ui.get_confirmed_reverse() != status.audition.reverse {
+                        publish_playback_progress(&ui, &status, false);
+                        controller.publish_confirmed_reverse(&ui, status.audition.reverse);
+                    }
+                    ui.set_reverse_pending(false);
+                    if let Err(error) = result {
+                        ui.set_status(error.to_string().into());
+                    }
+                });
+            });
         });
         let c = self.clone();
         ui.on_waveform_zoom_requested(move |factor| {
@@ -4319,7 +4354,11 @@ impl Controller {
                         let moved = {
                             let mut state = c.wave_view.lock().unwrap();
                             state.0 == file.file_path
-                                && state.1.follow(status.position, file.duration)
+                                && if status.audition.reverse {
+                                    state.1.follow_reverse(status.position, file.duration)
+                                } else {
+                                    state.1.follow(status.position, file.duration)
+                                }
                         };
                         if moved {
                             c.refresh_waveform(&file);
@@ -4374,6 +4413,7 @@ impl Controller {
                         let mut publication = playback_ui.lock().unwrap();
                         let progress_continues = publication.progress.observe(&status);
                         publish_playback_progress(&ui, &status, progress_continues);
+                        c2.publish_confirmed_reverse(&ui, status.audition.reverse);
                         publish_player_state(&ui, &status, buffering);
                         let protected_status = ui.get_closing()
                             || c2.closing.load(Ordering::Acquire)
@@ -9089,7 +9129,12 @@ pub(crate) fn publish_playback_progress(
     status: &audiolib_audio::PlaybackStatus,
     progress_continues: bool,
 ) {
-    let forward_step = status.position as f32 - ui.get_play_position();
+    let source_step = status.position as f32 - ui.get_play_position();
+    let forward_step = if status.audition.reverse {
+        -source_step
+    } else {
+        source_step
+    };
     ui.set_playback_clock(format!("{}:{}", status.generation, status.transport_revision).into());
     ui.set_confirmed_playback_rate(status.audition.rate);
     ui.set_playback_smooth(
@@ -9171,6 +9216,10 @@ pub(crate) fn publish_wave_target(ui: &AppWindow, view: WaveView, duration: f64)
     ui.set_wave_target_end(end as f32);
     ui.set_wave_zoom(view.zoom as f32);
     ui.set_wave_scroll(view.scroll as f32);
+    ui.set_ruler_ticks(ruler_model(start, end));
+}
+
+fn ruler_model(start: f64, end: f64) -> ModelRc<RulerTick> {
     let mut label_index = 0;
     let ticks = ruler_marks(start, end)
         .into_iter()
@@ -9186,7 +9235,7 @@ pub(crate) fn publish_wave_target(ui: &AppWindow, view: WaveView, duration: f64)
             tick
         })
         .collect::<Vec<_>>();
-    ui.set_ruler_ticks(ModelRc::new(VecModel::from(ticks)));
+    ModelRc::new(VecModel::from(ticks))
 }
 
 /// Typed transform fields the engine would reject: bit 1 Pitch, bit 2 Rate.
@@ -11689,6 +11738,7 @@ mod tests {
                 mono: true,
                 stereo_pair: false,
                 loop_enabled: true,
+                reverse: false,
             },
         };
         let expected = serde_json::to_value(&playback).unwrap();

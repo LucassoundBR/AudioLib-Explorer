@@ -17,6 +17,9 @@ pub struct AuditionSettings {
     /// Explicitly monitor the selected pair even when discrete multichannel output is available.
     pub stereo_pair: bool,
     pub loop_enabled: bool,
+    /// Play backwards in source coordinates while retaining channel order.
+    #[serde(default)]
+    pub reverse: bool,
 }
 impl Default for AuditionSettings {
     fn default() -> Self {
@@ -26,6 +29,7 @@ impl Default for AuditionSettings {
             mono: false,
             stereo_pair: false,
             loop_enabled: false,
+            reverse: false,
         }
     }
 }
@@ -84,7 +88,12 @@ impl AuditionDecoder {
         settings: AuditionSettings,
     ) -> Result<Self> {
         let end_frame = decoder.info.metadata.frames;
-        Self::new_bounded(decoder, output_rate, start_frame, end_frame, pair, settings)
+        let (start, end) = if settings.reverse {
+            (0, start_frame)
+        } else {
+            (start_frame, end_frame)
+        };
+        Self::new_bounded(decoder, output_rate, start, end, pair, settings)
     }
     /// Only selected source frames reach the resampler and SoundTouch input.
     #[cfg(test)]
@@ -149,7 +158,15 @@ impl AuditionDecoder {
             None
         };
         Ok(Self {
-            source: if end_frame == metadata.frames {
+            source: if settings.reverse {
+                ResampledDecoder::new_directional(
+                    decoder,
+                    output_rate,
+                    start_frame,
+                    end_frame,
+                    true,
+                )?
+            } else if end_frame == metadata.frames {
                 ResampledDecoder::new(decoder, output_rate, start_frame)?
             } else {
                 ResampledDecoder::new_bounded(decoder, output_rate, start_frame, end_frame)?

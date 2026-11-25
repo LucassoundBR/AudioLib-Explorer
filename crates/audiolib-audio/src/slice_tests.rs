@@ -657,3 +657,221 @@ fn rf64_header_describes_large_payload_without_narrowing_sizes() {
         header.len() as u64 - 8 + frames * 32
     );
 }
+
+#[test]
+fn reverse_exports_keep_frame_channels_precision_and_chunk_boundaries() {
+    let temp = tempfile::tempdir().unwrap();
+    for (width, float) in [
+        (1, false),
+        (2, false),
+        (3, false),
+        (4, false),
+        (4, true),
+        (8, true),
+    ] {
+        for channels in [1, 2, 6] {
+            let layout = format(width, channels, float);
+            let align = usize::from(layout.align());
+            let frames = COPY_BYTES / align + 19;
+            let bytes: Vec<u8> = (0..frames * align)
+                .map(|i| (i * 67 + i / 251 + 131) as u8)
+                .collect();
+            let source = temp
+                .path()
+                .join(format!("source-{width}-{float}-{channels}.wav"));
+            let output = temp
+                .path()
+                .join(format!("reverse-{width}-{float}-{channels}.wav"));
+            let original = wave(layout, frames as u64, &bytes);
+            std::fs::write(&source, &original).unwrap();
+            let mut previous = 0;
+            export_reversed_audio_slice(
+                &source,
+                &output,
+                range(3, frames as u64 - 5, 48000),
+                &AtomicBool::new(false),
+                &mut |done, total| {
+                    assert!(done >= previous && done <= total);
+                    previous = done;
+                },
+            )
+            .unwrap();
+            let (info, reversed) = data(&output);
+            let expected: Vec<u8> = bytes[3 * align..(frames - 5) * align]
+                .chunks_exact(align)
+                .rev()
+                .flatten()
+                .copied()
+                .collect();
+            assert_eq!(reversed, expected);
+            assert_eq!(
+                (
+                    info.metadata.sample_rate,
+                    info.metadata.channels,
+                    info.metadata.bit_depth
+                ),
+                (48000, channels, width * 8)
+            );
+            assert_eq!(info.metadata.frames, frames as u64 - 8);
+            assert_eq!(previous, info.metadata.frames);
+            assert_eq!(std::fs::read(&source).unwrap(), original);
+        }
+    }
+}
+
+#[test]
+fn reverse_flac_preserves_low_integer_bits_and_removes_its_spool() {
+    let temp = tempfile::tempdir().unwrap();
+    for bits in [16, 24, 32] {
+        let source = temp.path().join(format!("source-{bits}.flac"));
+        let output = temp.path().join(format!("reverse-{bits}.wav"));
+        let forward = temp.path().join(format!("forward-{bits}.wav"));
+        let samples: Vec<i32> = (0..31).map(|i| (i * 197 - 3001) | 1).collect();
+        let original = flac_integer(bits, &samples);
+        std::fs::write(&source, &original).unwrap();
+        export(&source, &forward, range(3, 28, 48000));
+        export_reversed_audio_slice(
+            &source,
+            &output,
+            range(3, 28, 48000),
+            &AtomicBool::new(false),
+            &mut |_, _| {},
+        )
+        .unwrap();
+        let (info, reversed) = data(&output);
+        let (_, forward) = data(&forward);
+        let align = usize::from(info.block_align);
+        let expected: Vec<u8> = forward
+            .chunks_exact(align)
+            .rev()
+            .flatten()
+            .copied()
+            .collect();
+        assert_eq!(reversed, expected);
+        assert_eq!(info.metadata.bit_depth, bits);
+        assert_eq!(std::fs::read(&source).unwrap(), original);
+    }
+    assert!(
+        std::fs::read_dir(temp.path()).unwrap().all(|entry| entry
+            .unwrap()
+            .file_type()
+            .unwrap()
+            .is_file())
+    );
+}
+
+#[test]
+fn reverse_cancellation_and_existing_destinations_preserve_other_files() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("source.wav");
+    let output = temp.path().join("reverse.wav");
+    let existing = temp.path().join("existing.wav");
+    let layout = format(3, 2, false);
+    let frames = COPY_BYTES as u64 + 99;
+    let audio = vec![0x37; frames as usize * usize::from(layout.align())];
+    let original = wave(layout, frames, &audio);
+    std::fs::write(&source, &original).unwrap();
+    std::fs::write(&existing, b"owned by caller").unwrap();
+    assert!(
+        export_reversed_audio_slice(
+            &source,
+            &existing,
+            range(0, frames, 48000),
+            &AtomicBool::new(false),
+            &mut |_, _| {}
+        )
+        .is_err()
+    );
+    assert_eq!(std::fs::read(&existing).unwrap(), b"owned by caller");
+    let cancel = AtomicBool::new(false);
+    let result = export_reversed_audio_slice(
+        &source,
+        &output,
+        range(0, frames, 48000),
+        &cancel,
+        &mut |done, _| {
+            if done > 0 {
+                cancel.store(true, Ordering::Release);
+            }
+        },
+    );
+    assert!(matches!(result, Err(Error::Cancelled)));
+    assert!(!output.exists());
+    assert_eq!(std::fs::read(&source).unwrap(), original);
+}
+
+#[test]
+fn reverse_one_frame_and_double_reverse_keep_exact_pcm() {
+    let temp = tempfile::tempdir().unwrap();
+    let layout = format(3, 1, false);
+    let bytes: Vec<u8> = (0..17 * 3).map(|i| (i * 19 + 7) as u8).collect();
+    let source = temp.path().join("source.wav");
+    let first = temp.path().join("first.wav");
+    let second = temp.path().join("second.wav");
+    let single = temp.path().join("single.wav");
+    std::fs::write(&source, wave(layout, 17, &bytes)).unwrap();
+    export_reversed_audio_file(&source, &first, &AtomicBool::new(false), &mut |_, _| {}).unwrap();
+    for (input, output, selection) in [
+        (&first, &second, range(0, 17, 48000)),
+        (&source, &single, range(7, 8, 48000)),
+    ] {
+        export_reversed_audio_slice(
+            input,
+            output,
+            selection,
+            &AtomicBool::new(false),
+            &mut |_, _| {},
+        )
+        .unwrap();
+    }
+    assert_eq!(data(&second).1, bytes);
+    assert_eq!(data(&single).1, &bytes[21..24]);
+}
+
+#[test]
+fn reverse_flac_cancellation_and_existing_destination_leave_no_spool() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("source.flac");
+    let output = temp.path().join("reverse.wav");
+    let existing = temp.path().join("existing.wav");
+    let samples: Vec<i32> = (0..31).map(|i| (i * 197 - 3001) | 1).collect();
+    let original = flac_integer(32, &samples);
+    std::fs::write(&source, &original).unwrap();
+    std::fs::write(&existing, b"keep existing destination").unwrap();
+    assert!(
+        export_reversed_audio_slice(
+            &source,
+            &existing,
+            range(0, 31, 48000),
+            &AtomicBool::new(false),
+            &mut |_, _| {},
+        )
+        .is_err()
+    );
+    let cancel = AtomicBool::new(false);
+    let result = export_reversed_audio_slice(
+        &source,
+        &output,
+        range(0, 31, 48000),
+        &cancel,
+        &mut |done, _| {
+            if done > 0 {
+                cancel.store(true, Ordering::Release);
+            }
+        },
+    );
+    assert!(matches!(result, Err(Error::Cancelled)));
+    assert!(!output.exists());
+    assert_eq!(
+        std::fs::read(&existing).unwrap(),
+        b"keep existing destination"
+    );
+    assert_eq!(std::fs::read(&source).unwrap(), original);
+    assert!(
+        std::fs::read_dir(temp.path()).unwrap().all(|entry| entry
+            .unwrap()
+            .file_type()
+            .unwrap()
+            .is_file())
+    );
+}

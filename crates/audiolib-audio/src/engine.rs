@@ -236,6 +236,8 @@ pub enum AudioCommand {
     ClearRange,
     SetVolume(f32),
     SetAudition(AuditionSettings),
+    /// Toggle the current direction in command order, retaining all other transforms.
+    ToggleReverse,
     /// Acknowledge after all preceding control commands have completed.
     Synchronize,
     Configure(PlaybackConfig),
@@ -962,6 +964,11 @@ impl Output {
         self.start_position
             + self.realtime.consumed.load(Ordering::Relaxed) as f64 / f64::from(self.sample_rate)
                 * f64::from(self.decoder.settings.rate)
+                * if self.decoder.settings.reverse {
+                    -1.0
+                } else {
+                    1.0
+                }
     }
     /// Silence and quiesce the consumer before any potentially blocking source
     /// operation. The stream keeps submitting silence while the worker does I/O.
@@ -1295,6 +1302,24 @@ fn playback_bounds(status: &PlaybackStatus) -> (f64, f64) {
         })
 }
 
+fn playback_start(status: &PlaybackStatus) -> f64 {
+    let (start, end) = playback_bounds(status);
+    if status.audition.reverse { end } else { start }
+}
+
+fn playback_end(status: &PlaybackStatus) -> f64 {
+    let (start, end) = playback_bounds(status);
+    if status.audition.reverse { start } else { end }
+}
+
+fn at_playback_end(status: &PlaybackStatus, position: f64) -> bool {
+    if status.audition.reverse {
+        position <= playback_end(status)
+    } else {
+        position >= playback_end(status)
+    }
+}
+
 fn prepare_audition_decoder(
     decoder: Decoder,
     output_rate: u32,
@@ -1307,9 +1332,15 @@ fn prepare_audition_decoder(
     let rate = decoder.info.metadata.sample_rate;
     let bounds = if let Some(range) = range {
         let mapped = range.map_inward(rate, decoder.info.metadata.frames)?;
-        let start = ((position * f64::from(rate)).round() as u64)
+        let frame = ((position * f64::from(rate)).round() as u64)
             .clamp(mapped.start_frame, mapped.end_frame);
-        start..mapped.end_frame
+        if settings.reverse {
+            mapped.start_frame..frame
+        } else {
+            frame..mapped.end_frame
+        }
+    } else if settings.reverse {
+        0..(position * f64::from(rate)).round() as u64
     } else {
         (position * f64::from(rate)) as u64..decoder.info.metadata.frames
     };
@@ -1377,7 +1408,7 @@ impl Worker {
             let mut status = self.status.lock().unwrap_or_else(|e| e.into_inner());
             let before = status.clone();
             action(&mut status);
-            if status.playback_range.is_some() {
+            if status.file_path.is_some() {
                 let (start, end) = playback_bounds(&status);
                 status.position = status.position.clamp(start, end);
             }
@@ -1508,7 +1539,7 @@ impl Worker {
         });
         self.update_transport(|status| {
             status.state = PlaybackState::Paused;
-            status.position = position.min(status.duration);
+            status.position = position.clamp(0.0, status.duration);
             status.error = Some(
                 "Output device was lost or reset. Select an available device and press Play."
                     .into(),
@@ -1641,6 +1672,11 @@ impl Worker {
         let path = status
             .file_path
             .ok_or_else(|| Error::Audio("No audio file is loaded".into()))?;
+        if self.config.audition.reverse && crate::source::is_stream_source(&path) {
+            return Err(Error::Validation(
+                "Reverse preview requires a local original".into(),
+            ));
+        }
         let decoder = Decoder::open(&path)?;
         let host = host(self.config.backend)?;
         // CPAL ASIO's iterator owns the driver's strong reference until a Stream exists.
@@ -1858,6 +1894,11 @@ impl Worker {
     fn command(&mut self, command: AudioCommand) -> Result<()> {
         match command {
             AudioCommand::Load(path) => {
+                // Buffered server streams do not promise backwards-ready regions.
+                // A newly selected unsupported source opens normally, with Reverse off.
+                if crate::source::is_stream_source(&path) {
+                    self.config.audition.reverse = false;
+                }
                 let generation = self.snapshot().generation.wrapping_add(1);
                 self.suspend_output()?;
                 self.needs_recovery = false;
@@ -1889,13 +1930,18 @@ impl Worker {
                 // layout (headers up to the data chunk) is all Load needs, read once.
                 let decoder = Decoder::open(&path)?;
                 let metadata = decoder.info.metadata.clone();
+                let source_start = if self.config.audition.reverse {
+                    metadata.duration
+                } else {
+                    0.0
+                };
                 if self.output.as_ref().is_some_and(|output| {
                     self.config.rate_policy == RatePolicy::DeviceDefault
                         || output.sample_rate == metadata.sample_rate
                 }) {
                     self.output.as_mut().unwrap().reset_source(
                         || Ok(decoder),
-                        0.0,
+                        source_start,
                         self.config.source_pair,
                         false,
                         self.config.audition,
@@ -1916,6 +1962,7 @@ impl Worker {
                         state: PlaybackState::Ready,
                         file_path: Some(path),
                         duration: metadata.duration,
+                        position: source_start,
                         sample_rate: metadata.sample_rate,
                         channels: metadata.channels,
                         output_channels: prepared.output_channels,
@@ -1939,16 +1986,16 @@ impl Worker {
                 let before = self.snapshot();
                 if before.state == PlaybackState::Playing
                     && (before.playback_range.is_none()
-                        || before.position < playback_bounds(&before).1)
+                        || !at_playback_end(&before, before.position))
                 {
                     return Ok(());
                 }
                 if before.state == PlaybackState::Ended
                     || (before.playback_range.is_some()
-                        && before.position >= playback_bounds(&before).1)
+                        && at_playback_end(&before, before.position))
                 {
                     let status = self.snapshot();
-                    let start = playback_bounds(&status).0;
+                    let start = playback_start(&status);
                     let path = status.file_path.unwrap();
                     if let Some(output) = &mut self.output {
                         output.reset_source(
@@ -1972,7 +2019,7 @@ impl Worker {
                     });
                 } else {
                     if self.snapshot().state == PlaybackState::Ended {
-                        self.update(|status| status.position = playback_bounds(status).0);
+                        self.update(|status| status.position = playback_start(status));
                     }
                     if let Err(error) = self.start_output() {
                         if self.needs_recovery && self.config.backend == AudioBackend::Asio {
@@ -1991,7 +2038,7 @@ impl Worker {
                     let position = output.position();
                     let ended = output.eof && output.realtime.ring.len() == 0;
                     self.update_transport(|status| {
-                        status.position = position.min(status.duration);
+                        status.position = position.clamp(0.0, status.duration);
                         status.buffering = false;
                         status.state = if ended {
                             PlaybackState::Ended
@@ -2003,7 +2050,7 @@ impl Worker {
             }
             AudioCommand::Stop => {
                 let status = self.snapshot();
-                let start = playback_bounds(&status).0;
+                let start = playback_start(&status);
                 if let Some(output) = &mut self.output {
                     let path = self
                         .status
@@ -2053,7 +2100,7 @@ impl Worker {
                 }
                 self.update_transport(|current| {
                     current.position = position;
-                    if status.state == PlaybackState::Ended && position < end {
+                    if status.state == PlaybackState::Ended && !at_playback_end(&status, position) {
                         current.state = PlaybackState::Paused;
                     }
                 });
@@ -2079,10 +2126,15 @@ impl Worker {
                     decoder.info.metadata.sample_rate,
                     decoder.info.metadata.frames,
                 )?;
+                let position = if self.config.audition.reverse {
+                    range.end_seconds()
+                } else {
+                    range.start_seconds()
+                };
                 if let Some(output) = &mut self.output {
                     output.reset_source(
                         || Ok(decoder),
-                        range.start_seconds(),
+                        position,
                         self.config.source_pair,
                         false,
                         self.config.audition,
@@ -2091,7 +2143,7 @@ impl Worker {
                 }
                 self.update_transport(|status| {
                     status.playback_range = Some(range);
-                    status.position = range.start_seconds();
+                    status.position = position;
                     // Play must resume the newly prepared range even if the old source ended.
                     if matches!(status.state, PlaybackState::Ended | PlaybackState::Playing) {
                         status.state = PlaybackState::Paused;
@@ -2141,6 +2193,12 @@ impl Worker {
                 }
                 self.update(|status| status.volume = volume);
             }
+            AudioCommand::ToggleReverse => {
+                self.command(AudioCommand::SetAudition(AuditionSettings {
+                    reverse: !self.config.audition.reverse,
+                    ..self.config.audition
+                }))?;
+            }
             AudioCommand::SetAudition(settings) => {
                 settings.validate()?;
                 let old = self.config.audition;
@@ -2149,14 +2207,39 @@ impl Worker {
                     settings.rate,
                     settings.mono,
                     settings.stereo_pair,
-                ) != (old.pitch_semitones, old.rate, old.mono, old.stereo_pair)
-                {
+                    settings.reverse,
+                ) != (
+                    old.pitch_semitones,
+                    old.rate,
+                    old.mono,
+                    old.stereo_pair,
+                    old.reverse,
+                ) {
                     let status = self.snapshot();
-                    let position = self
+                    if settings.reverse
+                        && status
+                            .file_path
+                            .as_ref()
+                            .is_some_and(|path| crate::source::is_stream_source(path))
+                    {
+                        return Err(Error::Validation(
+                            "Reverse preview requires a local original".into(),
+                        ));
+                    }
+                    let (start, end) = playback_bounds(&status);
+                    let mut position = self
                         .output
                         .as_ref()
                         .map_or(status.position, |output| output.position())
-                        .min(status.duration);
+                        .clamp(start, end);
+                    if settings.reverse != old.reverse {
+                        let half_frame = 0.5 / f64::from(status.sample_rate.max(1));
+                        if settings.reverse && position <= start + half_frame {
+                            position = end;
+                        } else if !settings.reverse && position >= end - half_frame {
+                            position = start;
+                        }
+                    }
                     if let Some(output) = &mut self.output {
                         output.reset_source(
                             || Decoder::open(status.file_path.as_ref().unwrap()),
@@ -2390,12 +2473,13 @@ impl Worker {
                     .drain_deadline
                     .is_some_and(|deadline| std::time::Instant::now() >= deadline);
             self.update(|status| {
-                status.position = position.min(playback_bounds(status).1);
+                status.position =
+                    position.clamp(playback_bounds(status).0, playback_bounds(status).1);
                 status.underruns = underruns;
                 status.buffering = buffering;
             });
             if ended && self.config.audition.loop_enabled && self.snapshot().duration > 0.0 {
-                let start = playback_bounds(&self.snapshot()).0;
+                let start = playback_start(&self.snapshot());
                 if let Err(error) = self.execute_command(AudioCommand::Seek(start)) {
                     self.update(|status| status.error = Some(error.to_string()));
                 }
@@ -2408,7 +2492,7 @@ impl Worker {
                 }
                 self.update_transport(|status| {
                     status.state = PlaybackState::Ended;
-                    status.position = playback_bounds(status).1;
+                    status.position = playback_end(status);
                 });
             }
         }
@@ -2431,6 +2515,10 @@ mod buffer_tests;
 #[cfg(test)]
 #[path = "playback_range_tests.rs"]
 mod playback_range_tests;
+
+#[cfg(test)]
+#[path = "reverse_playback_tests.rs"]
+mod reverse_playback_tests;
 
 #[cfg(test)]
 mod tests {
@@ -3176,6 +3264,7 @@ mod tests {
                 mono: true,
                 stereo_pair: false,
                 loop_enabled: true,
+                reverse: false,
             };
             let mut worker = worker(PlaybackStatus {
                 generation: 8,

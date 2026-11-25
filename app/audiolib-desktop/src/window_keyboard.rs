@@ -1,7 +1,7 @@
 // app/audiolib-desktop/src/window_keyboard.rs
 //! Preserve activation-key repeat metadata lost by Slint 1.17.1's winit backend.
 //!
-//! Real repeated Space, Enter and S shortcut presses use Slint's
+//! Real repeated Space, Enter, R and S shortcut presses use Slint's
 //! public repeated-key input. Other events remain backend-owned.
 //! Ctrl+Alt combinations also remain backend-owned: on Windows the public input
 //! API cannot supply `text_without_modifiers`, which Slint needs to distinguish
@@ -83,7 +83,7 @@ fn repeat_text(
         Key::Named(NamedKey::Enter) => Some(slint::platform::Key::Return.into()),
         Key::Character(text) if text == " " || text == "\n" => Some(text.as_str().into()),
         Key::Character(text)
-            if matches!(text.as_str(), "s" | "S")
+            if matches!(text.as_str(), "r" | "R" | "s" | "S")
                 && !modifiers.intersects(
                     ModifiersState::CONTROL | ModifiersState::ALT | ModifiersState::SUPER,
                 ) =>

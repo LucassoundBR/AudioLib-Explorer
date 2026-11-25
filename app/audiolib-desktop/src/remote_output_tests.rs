@@ -163,6 +163,7 @@ fn child_remote_source_pair() {
             mono: true,
             stereo_pair: false,
             loop_enabled: true,
+            reverse: false,
         };
         engine
             .handle()

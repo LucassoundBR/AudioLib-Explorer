@@ -2,6 +2,21 @@
 //! Waveform viewport and pixel rendering, independent of transport processing.
 use audiolib_audio::{SPECTRAL_PEAK_BASE, WaveformData, spectral_color};
 
+/// Mirror one rendered viewport. Source peak data and cached list images stay original.
+pub(crate) fn mirror_preview(image: slint::Image) -> slint::Image {
+    let Some(mut pixels) = image.to_rgba8() else {
+        return image;
+    };
+    let width = pixels.width() as usize;
+    if width == 0 {
+        return image;
+    }
+    for row in pixels.make_mut_slice().chunks_exact_mut(width) {
+        row.reverse();
+    }
+    slint::Image::from_rgba8(pixels)
+}
+
 const SPECTRAL_BACKGROUND: [u8; 4] = [132, 144, 148, 255];
 const NORMAL_BACKGROUND: [u8; 4] = [29, 35, 40, 255];
 const LIGHT_BACKGROUND: [u8; 4] = [181, 191, 195, 255];
@@ -32,6 +47,19 @@ impl Default for WaveView {
     }
 }
 impl WaveView {
+    /// Follow in elapsed playback coordinates, retaining source coordinates in the viewport.
+    pub fn follow_reverse(&mut self, position: f64, duration: f64) -> bool {
+        let mut mirrored = Self {
+            scroll: 1.0 - self.scroll,
+            ..*self
+        };
+        if !mirrored.follow(duration - position, duration) {
+            return false;
+        }
+        self.scroll = 1.0 - mirrored.scroll;
+        true
+    }
+
     pub fn range(self, duration: f64) -> (f64, f64) {
         let span = duration / self.zoom.clamp(1.0, 128.0);
         let start = (duration - span).max(0.0) * self.scroll.clamp(0.0, 1.0);

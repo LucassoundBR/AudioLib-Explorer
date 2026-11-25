@@ -1104,6 +1104,101 @@ fn predicted_playhead_does_not_advance_past_selection_end() {
 }
 
 #[test]
+fn reverse_waveform_maps_selection_seek_and_zoom_to_the_original() {
+    i_slint_backend_testing::init_no_event_loop();
+    for modern in [false, true] {
+        let ui = window(modern);
+        ui.set_wave_source_duration(30.0);
+        ui.set_rows(slint::ModelRc::new(slint::VecModel::from(vec![
+            crate::AudioRow {
+                id: "42".into(),
+                name: "Reverse test.wav".into(),
+                ..Default::default()
+            },
+        ])));
+        crate::ui_tests::click_label(&ui, "Reverse test.wav");
+        let requests = Rc::new(RefCell::new(0));
+        let observed = requests.clone();
+        ui.on_reverse_requested(move || *observed.borrow_mut() += 1);
+        crate::ui_tests::click_label(&ui, "Reverse audio");
+        assert_eq!(*requests.borrow(), 1);
+        crate::ui_tests::send_keys(&ui, &["r".into()]);
+        assert_eq!(*requests.borrow(), 2);
+        ui.window()
+            .dispatch_event(WindowEvent::KeyPressRepeated { text: "r".into() });
+        assert_eq!(*requests.borrow(), 2);
+
+        ui.set_confirmed_reverse(true);
+        settle();
+        let ranges = accept_ranges(&ui);
+        select(&ui, 0.2, 0.6);
+        near(ranges.borrow()[0], (8.0, 16.0));
+        ui.set_wave_selection_active(false);
+        settle();
+
+        let seeks = Rc::new(RefCell::new(Vec::new()));
+        let observed = seeks.clone();
+        ui.on_seek_play_requested(move |time| observed.borrow_mut().push(time));
+        pressed(&ui, 0.1);
+        released(&ui, 0.1);
+        assert!((seeks.borrow()[0] - 18.0).abs() < 0.025);
+
+        let zooms = Rc::new(RefCell::new(Vec::new()));
+        let observed = zooms.clone();
+        ui.on_waveform_wheel_zoom_requested(move |_, fraction| {
+            observed.borrow_mut().push(fraction)
+        });
+        ui.window().dispatch_event(WindowEvent::PointerScrolled {
+            position: point(&ui, 0.2),
+            delta_x: 0.0,
+            delta_y: 120.0,
+        });
+        assert!((zooms.borrow()[0] - 0.8).abs() < 0.001);
+
+        // During a viewport change, input follows the pending range.
+        ui.set_wave_target_start(4.0);
+        ui.set_wave_target_end(12.0);
+        settle();
+        select(&ui, 0.25, 0.75);
+        near(*ranges.borrow().last().unwrap(), (6.0, 10.0));
+        ui.hide().unwrap();
+    }
+}
+
+#[test]
+fn reverse_playhead_advances_right_and_stops_at_the_visual_selection_end() {
+    i_slint_backend_testing::init_no_event_loop();
+    for modern in [false, true] {
+        let ui = window(modern);
+        ui.set_wave_selection_start(4.0);
+        ui.set_wave_selection_end(8.0);
+        ui.set_wave_selection_active(true);
+        ui.set_confirmed_reverse(true);
+        ui.set_play_position(4.1);
+        ui.set_confirmed_playback_rate(4.0);
+        ui.set_playback_smooth(true);
+        ui.set_playing(true);
+        ui.set_playback_clock("reverse-range-play".into());
+        let fraction = || {
+            i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+            let wave = ElementHandle::find_by_accessible_label(&ui, "Waveform timeline")
+                .next()
+                .unwrap();
+            let played = ElementHandle::find_by_accessible_label(&ui, "Played waveform region")
+                .next()
+                .unwrap();
+            played.size().width / wave.size().width
+        };
+        assert!((fraction() - 0.795).abs() < 0.0001);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(16));
+        assert!((fraction() - 0.7982).abs() < 0.0001);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(16));
+        assert!((fraction() - 0.8).abs() < 0.0001);
+        ui.hide().unwrap();
+    }
+}
+
+#[test]
 fn export_folder_choice_is_reachable_in_both_languages() {
     i_slint_backend_testing::init_no_event_loop();
     for chinese in [false, true] {

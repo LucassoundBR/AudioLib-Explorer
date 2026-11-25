@@ -11,6 +11,11 @@ audition toolbar, including in Default Lucas, also has a **Send to REAPER** icon
 With a region selected, both controls use its prepared WAV. For a server sound,
 select a region and let its WAV finish preparing.
 
+For local audio, turn on **Reverse** with the button or **R**. The Waveform
+mirrors and the playhead still moves from left to right. Dragging out a selected
+region and sending it to REAPER both use the same reversed WAV. Sending a local
+sound with no selection renders the entire file in reverse.
+
 Enable **Auto-Focus** next to the Send icon to bring REAPER forward after an
 acknowledged insertion. It starts unchecked. If Windows denies the focus change,
 the audio remains inserted. REAPER groups the insertion into a single Undo step

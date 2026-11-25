@@ -1849,8 +1849,24 @@ export component AppWindow inherits Window {
     in-out property <bool> reaper-auto-focus: false;
     callback reaper-send-requested();
     callback reaper-setup-requested();
-    private property <bool> reaper-send-ready: root.reaper-supported &&
+    private property <bool> reaper-send-ready: root.reaper-supported && !root.reverse-pending &&
         (root.wave-selection-active ? !root.wave-selection-preparing : root.has-selection && !root.selected-missing && !root.remote-mode);
+    in property <bool> confirmed-reverse: false;
+    in property <bool> reverse-pending: false;
+    in property <float> wave-source-duration: 0;
+    out property <bool> reverse-ready: root.menu-ready && !root.background-blocked
+        && root.audio-ready && !root.remote-mode && !root.reverse-pending
+        && !root.reaper-busy && !root.wave-selection-gesture;
+    callback reverse-requested();
+    pure callback mirror-waveform(image) -> image;
+    pure callback display-ruler(float, float) -> [RulerTick];
+    private property <bool> reverse-view: root.confirmed-reverse && !root.remote-mode;
+    private property <float> reverse-duration: root.wave-source-duration > 0 ? root.wave-source-duration : root.play-duration;
+    private property <image> display-waveform: root.reverse-view ? root.mirror-waveform(root.waveform-image) : root.waveform-image;
+    private property <image> display-mask: root.reverse-view ? root.mirror-waveform(root.waveform-mask) : root.waveform-mask;
+    private property <[RulerTick]> display-ticks: root.reverse-view
+        ? root.display-ruler(max(0, root.reverse-duration - root.wave-target-end), max(0, root.reverse-duration - root.wave-target-start))
+        : root.ruler-ticks;
     in-out property <int> peak-mode: 1;
     in-out property <float> peak-gain: 0;
     in-out property <float> peak-opacity: 0.85;
@@ -3201,6 +3217,12 @@ export component AppWindow inherits Window {
         // Editors and keyboard-focused buttons handle Space first. A slider can
         // keep its own focus for arrow keys and let Space fall through here.
         key-pressed(event) => {
+            if (event.text == "r" || event.text == "R") && root.reverse-ready
+                && !event.modifiers.alt && !event.modifiers.control && !event.modifiers.meta
+            {
+                if !event.repeat { root.reverse-requested(); }
+                return accept;
+            }
             if (event.text == "s" || event.text == "S") && root.menu-ready && !root.background-blocked
                 && root.reaper-send-ready && !root.reaper-busy && !root.wave-selection-gesture
                 && !event.modifiers.alt && !event.modifiers.control && !event.modifiers.meta
@@ -4057,6 +4079,8 @@ main-scroll := ScrollView {
             resized(value) => { root.resize-audition(min(-value, audition-workspace.available-dock-height)); }
         }
         audition := AuditionPanel {
+            display-reverse: root.reverse-view; source-duration: root.reverse-duration;
+            reverse-ready: root.reverse-ready; reverse-requested => { root.reverse-requested(); }
             reaper-supported: root.reaper-supported; reaper-ready: root.reaper-send-ready;
             reaper-busy: root.reaper-busy; reaper-blocked: !root.menu-ready || root.background-blocked || root.wave-selection-gesture;
             reaper-auto-focus <=> root.reaper-auto-focus; reaper-send => { root.reaper-send-requested(); }
@@ -4080,21 +4104,21 @@ main-scroll := ScrollView {
             height: audition-workspace.dock-height;
             expanded: root.audition-expanded;
             narrow: root.content-width < 1440px * Theme.ui-scale;
-            waveform-mask: root.waveform-mask;
+            waveform-mask: root.display-mask;
             expanded-requested(value) => { root.expand-audition(value); }
             compact: root.short-layout; spectral: root.peak-mode == 1;
             play-on-single-click: root.audition-play-on-single-click;
             chinese: root.chinese; ready: root.audio-ready && !root.selected-missing && !root.library-busy;
-            missing: root.selected-missing; busy: root.library-busy;
+            missing: root.selected-missing; busy: root.library-busy || root.reverse-pending;
             state: root.playback-state; error-text: root.playback-error; buffering: root.playback-buffering;
             waveform-progress: root.waveform-progress;
             output-backend: root.output-backend; output-rate: root.output-rate; output-xruns: root.output-xruns;
             target-start: root.wave-target-start; target-end: root.wave-target-end;
             relink-enabled: !root.closing && !root.library-busy && root.has-selection;
-            playing: root.playing; smooth-progress: root.playback-smooth; progress-clock: root.playback-clock; playback-rate: root.confirmed-playback-rate; waveform: root.waveform-image; waveform-ready: root.waveform-ready;
+            playing: root.playing; smooth-progress: root.playback-smooth; progress-clock: root.playback-clock; playback-rate: root.confirmed-playback-rate; waveform: root.display-waveform; waveform-ready: root.waveform-ready;
             name: root.playback-name; info: root.waveform-info; output: root.output-summary;
             position: root.play-position; duration: root.play-duration; time: root.play-time; end-time: root.play-end;
-            view-start: root.view-start; view-end: root.view-end; zoom: root.wave-zoom; ruler-ticks: root.ruler-ticks;
+            view-start: root.view-start; view-end: root.view-end; zoom: root.wave-zoom; ruler-ticks: root.display-ticks;
             scroll <=> root.wave-scroll; volume-db <=> root.volume-db; volume-label: root.volume-label;
             pitch-text <=> root.pitch-text; rate-text <=> root.speed-text; mono <=> root.audition-mono; stereo-pair <=> root.audition-stereo-pair;
             monitor-source-channels: root.monitor-source-channels; monitor-output-channels: root.monitor-output-channels; repeat <=> root.audition-repeat;
@@ -4957,6 +4981,8 @@ main-scroll := ScrollView {
             resized(value) => { root.resize-audition(min(-value, studio-audition-workspace.available-dock-height)); }
         }
         studio-audition := AuditionPanel {
+            display-reverse: root.reverse-view; source-duration: root.reverse-duration;
+            reverse-ready: root.reverse-ready; reverse-requested => { root.reverse-requested(); }
             reaper-supported: root.reaper-supported; reaper-ready: root.reaper-send-ready;
             reaper-busy: root.reaper-busy; reaper-blocked: !root.menu-ready || root.background-blocked || root.wave-selection-gesture;
             reaper-auto-focus <=> root.reaper-auto-focus; reaper-send => { root.reaper-send-requested(); }
@@ -4980,21 +5006,21 @@ main-scroll := ScrollView {
             height: studio-audition-workspace.dock-height;
             expanded: root.audition-expanded;
             narrow: root.content-width < 1440px * Theme.ui-scale;
-            waveform-mask: root.waveform-mask;
+            waveform-mask: root.display-mask;
             expanded-requested(value) => { root.expand-audition(value); }
             compact: root.short-layout; spectral: root.peak-mode == 1;
             play-on-single-click: root.audition-play-on-single-click;
             chinese: root.chinese; ready: root.audio-ready && !root.selected-missing && !root.library-busy;
-            missing: root.selected-missing; busy: root.library-busy;
+            missing: root.selected-missing; busy: root.library-busy || root.reverse-pending;
             state: root.playback-state; error-text: root.playback-error; buffering: root.playback-buffering;
             waveform-progress: root.waveform-progress;
             output-backend: root.output-backend; output-rate: root.output-rate; output-xruns: root.output-xruns;
             target-start: root.wave-target-start; target-end: root.wave-target-end;
             relink-enabled: !root.closing && !root.library-busy && root.has-selection;
-            playing: root.playing; smooth-progress: root.playback-smooth; progress-clock: root.playback-clock; playback-rate: root.confirmed-playback-rate; waveform: root.waveform-image; waveform-ready: root.waveform-ready;
+            playing: root.playing; smooth-progress: root.playback-smooth; progress-clock: root.playback-clock; playback-rate: root.confirmed-playback-rate; waveform: root.display-waveform; waveform-ready: root.waveform-ready;
             name: root.playback-name; info: root.waveform-info; output: root.output-summary;
             position: root.play-position; duration: root.play-duration; time: root.play-time; end-time: root.play-end;
-            view-start: root.view-start; view-end: root.view-end; zoom: root.wave-zoom; ruler-ticks: root.ruler-ticks;
+            view-start: root.view-start; view-end: root.view-end; zoom: root.wave-zoom; ruler-ticks: root.display-ticks;
             scroll <=> root.wave-scroll; volume-db <=> root.volume-db; volume-label: root.volume-label;
             pitch-text <=> root.pitch-text; rate-text <=> root.speed-text; mono <=> root.audition-mono; stereo-pair <=> root.audition-stereo-pair;
             monitor-source-channels: root.monitor-source-channels; monitor-output-channels: root.monitor-output-channels; repeat <=> root.audition-repeat;
