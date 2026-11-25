@@ -58,8 +58,8 @@ impl ResidentPeaks {
         Self { base, levels }
     }
 
-    pub(crate) fn viewport(&self, start: f64, end: f64, width: u32) -> WaveformData {
-        project(&self.base, &self.levels, start, end, width)
+    pub(crate) fn viewport(&self, start: f64, end: f64, width: u32, smooth: bool) -> WaveformData {
+        project(&self.base, &self.levels, start, end, width, smooth)
     }
 }
 
@@ -71,6 +71,7 @@ pub(crate) fn loading_overview(base: &WaveformData, width: u32) -> WaveformData 
         0.0,
         base.frames as f64 / f64::from(base.sample_rate),
         width,
+        false,
     )
 }
 
@@ -80,6 +81,7 @@ fn project(
     start: f64,
     end: f64,
     width: u32,
+    smooth: bool,
 ) -> WaveformData {
     let rate = f64::from(base.sample_rate);
     let start = ((start * rate).round() as u64).min(base.frames);
@@ -88,11 +90,23 @@ fn project(
     let width = u64::from(width.max(1));
     let edge = |x| start + span / width * x + (span % width) * x / width;
     let spp = u64::from(base.samples_per_pixel.max(1));
+    let sparse = smooth && spp > 1 && span > 0 && span < width * spp;
     let peaks = base
         .peaks
         .iter()
         .enumerate()
         .map(|(channel, lane)| {
+            if sparse {
+                let first = (start / spp) as usize;
+                let last = (end.div_ceil(spp) as usize).min(lane.len());
+                if let Some(visible) = lane.get(first..last).filter(|bins| !bins.is_empty()) {
+                    let step = span as f64 / width as f64 / spp as f64;
+                    let origin = (start % spp) as f64 / spp as f64 - 0.5;
+                    return (0..width)
+                        .map(|x| interpolated_peak(visible, origin + (x as f64 + 0.5) * step, step))
+                        .collect();
+                }
+            }
             (0..width)
                 .map(|x| {
                     let a = edge(x).min(base.frames.saturating_sub(1));
@@ -135,6 +149,29 @@ fn project(
         channels: base.channels,
         samples_per_pixel: span.div_ceil(width).clamp(1, u64::from(u32::MAX)) as u32,
         peaks,
+    }
+}
+
+// At close zoom several pixels can cover the same analysis bin. Anchor each
+// measured peak at its center and connect the envelope between those anchors.
+// Frequency remains categorical; interpolating Hz would invent a new tone.
+fn interpolated_peak(bins: &[WaveformPeak], center: f64, step: f64) -> WaveformPeak {
+    let center = center.clamp(0.0, (bins.len() - 1) as f64);
+    let nearest = center.round();
+    if (center - nearest).abs() <= step * 0.5 {
+        return bins[nearest as usize].clone();
+    }
+    let left = center.floor() as usize;
+    let right = &bins[left + 1];
+    let left = &bins[left];
+    let t = center.fract() as f32;
+    let interpolate = |a: f32, b: f32| (b - a).mul_add(t, a);
+    WaveformPeak {
+        min: interpolate(left.min, right.min),
+        max: interpolate(left.max, right.max),
+        rms: interpolate(left.rms, right.rms),
+        tonality: interpolate(left.tonality, right.tonality),
+        ..if t < 0.5 { left.clone() } else { right.clone() }
     }
 }
 
@@ -208,15 +245,15 @@ mod tests {
                 .collect(),
         };
         let resident = ResidentPeaks::new(base);
-        let full = resident.viewport(0., 0.205, 1);
+        let full = resident.viewport(0., 0.205, 1, true);
         assert_eq!(full.peaks[0][0].max, 1.0);
         assert!((full.peaks[1][0].rms - ((3.0_f32 + 202.0 * 0.01) / 205.0).sqrt()).abs() < 1e-5);
-        let left = resident.viewport(0.0, 0.038, 5);
+        let left = resident.viewport(0.0, 0.038, 5, true);
         assert!(left.peaks[0].iter().all(|p| p.max == 0.1));
-        let right = resident.viewport(0.040, 0.205, 165);
+        let right = resident.viewport(0.040, 0.205, 165, false);
         assert!(right.peaks[0].iter().all(|p| p.max == 0.1));
         assert_eq!(right.peaks[1][164].max, 1.0);
-        let tail = resident.viewport(0.204, 0.205, 64);
+        let tail = resident.viewport(0.204, 0.205, 64, true);
         assert!(tail.peaks[1].iter().all(|p| p.max == 1.0));
         for channels in [1, 2, 6, 32, 256] {
             let frames = 4_000_000_017_u64;
@@ -265,7 +302,7 @@ mod tests {
                 };
                 let (a, b) = view.range(duration);
                 let start = Instant::now();
-                let data = resident.viewport(a, b, 1440);
+                let data = resident.viewport(a, b, 1440, true);
                 let (pixels, mask) = render_waveform_layers(&data, 1440, 96, view, studio);
                 samples.push(start.elapsed());
                 assert_eq!(pixels.as_bytes().len(), 1440 * 96 * 4);
@@ -277,6 +314,81 @@ mod tests {
                 "resident waveform, 1440x96 stereo, studio={studio}, 96 views: p50={:?}, p95={:?}",
                 samples[48], samples[91]
             );
+        }
+    }
+    #[test]
+    fn waveform_sparse_view_connects_bins_without_losing_the_measured_peak() {
+        let peak = |v: f32| WaveformPeak {
+            min: -v,
+            max: v,
+            rms: v,
+            ..Default::default()
+        };
+        let resident = ResidentPeaks::new(WaveformData {
+            sample_rate: 1000,
+            channels: 1,
+            frames: 300,
+            samples_per_pixel: 100,
+            peaks: vec![vec![peak(0.1), peak(1.0), peak(0.2)]],
+        });
+        let plain = resident.viewport(0.0, 0.3, 30, false);
+        let smooth = resident.viewport(0.0, 0.3, 30, true);
+        let before = &plain.peaks[0];
+        let after = &smooth.peaks[0];
+        assert!(before[5..10].iter().all(|p| p.max == 0.1));
+        assert!(after[6..14].windows(2).all(|p| p[0].max < p[1].max));
+        assert!(after.iter().any(|p| p.max == 1.0 && p.min == -1.0));
+        assert!(after.iter().all(|p| (0.1..=1.0).contains(&p.max)));
+    }
+
+    #[test]
+    #[ignore = "requires an explicit local WAV and output directory"]
+    fn waveform_real_wav_comparison() {
+        use std::path::PathBuf;
+        let source = PathBuf::from(std::env::var_os("AUDIOLIB_WAVEFORM_COMPARE_WAV").unwrap());
+        let output = PathBuf::from(std::env::var_os("AUDIOLIB_WAVEFORM_COMPARE_DIR").unwrap());
+        let info = audiolib_audio::probe(&source).unwrap();
+        let resident = ResidentPeaks::new(
+            audiolib_audio::waveform(&source, source_request(info.frames, info.channels)).unwrap(),
+        );
+        let loudest = resident.base.peaks[0]
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.rms.total_cmp(&b.rms))
+            .unwrap()
+            .0;
+        let width = 2560;
+        let height = 176;
+        let rate = f64::from(info.sample_rate);
+        let duration = info.frames as f64 / rate;
+        let center = loudest as f64 * f64::from(resident.base.samples_per_pixel) / rate;
+        std::fs::create_dir_all(&output).unwrap();
+        for zoom in [1.0, 128.0] {
+            let span = duration / zoom;
+            let start = (center - span / 2.0).clamp(0.0, duration - span);
+            let end = start + span;
+            let view = WaveView {
+                zoom,
+                light_canvas: true,
+                ..Default::default()
+            };
+            let mut comparison = Vec::new();
+            for smooth in [false, true] {
+                let data = resident.viewport(start, end, width, smooth);
+                let (pixels, _) = render_waveform_layers(&data, width, height, view, false);
+                comparison.extend_from_slice(pixels.as_bytes());
+            }
+            let half = comparison.len() / 2;
+            assert_eq!(comparison[..half] == comparison[half..], zoom == 1.0);
+            image::save_buffer(
+                output.join(format!("waveform-{zoom:.0}x-antes-em-cima.png")),
+                &comparison,
+                width,
+                height * 2,
+                image::ColorType::Rgba8,
+            )
+            .unwrap();
+            eprintln!("{zoom:.0}x: {start:.6}–{end:.6}s, {width}x{height}, 0 dB display gain");
         }
     }
 }

@@ -5923,7 +5923,8 @@ impl Controller {
             let (_, source, peaks) = resident.as_ref().unwrap();
             job.source = source.clone();
             let (start, end) = job.view.range(job.duration);
-            self.publish_waveform(&job, &peaks.viewport(start, end, job.width), 1.0);
+            let smooth = *self.theme.lock().unwrap() == DEFAULT_LUCAS_THEME;
+            self.publish_waveform(&job, &peaks.viewport(start, end, job.width, smooth), 1.0);
         }
     }
 

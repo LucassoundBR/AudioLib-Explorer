@@ -2658,6 +2658,8 @@ export component AppWindow inherits Window {
     property <AudioRow> context-file;
     property <FolderRow> context-folder;
     property <int> filter-count: (root.sample-filter > 0 ? 1 : 0) + (root.bit-filter > 0 ? 1 : 0) + (root.channel-filter > 0 ? 1 : 0) + (root.favorites-only ? 1 : 0) + (root.tagged-only ? 1 : 0) + (root.tag-filter != "" ? max(1, root.tag-term-count) : 0) + (root.color-filter != "" ? 1 : 0) + (root.album-filter != "" ? 1 : 0) + (root.duration-min != "" || root.duration-max != "" ? 1 : 0);
+    private property <bool> has-search-scope: root.query != "" || root.filter-count > 0
+        || root.selected-folder-path != "" || root.visibility-index != 0;
     callback file-action-requested(string, int);
     callback favorite-set-requested(string, bool);
     callback folder-action-requested(string, int);
@@ -3844,7 +3846,10 @@ main-scroll := ScrollView {
                             if root.rows.length == 0: VerticalLayout { padding: 24px * Theme.ui-scale; alignment: center; spacing: 12px * Theme.ui-scale;
                                 Text { text: root.searching ? (root.chinese ? "正在搜索…" : "Searching…") : (root.chinese ? "这里还没有声音" : "No sounds in this view"); color: Theme.text(2, 0, Theme.ink); horizontal-alignment: center; font-size: Theme.font(18); }
                                 Label { text-module: 2; text: root.visibility-index == 1 ? (root.chinese ? "当前仅显示缺失文件，没有匹配的记录。" : "No matching missing files. Only missing records are shown.") : root.query != "" || root.filter-count > 0 || root.favorites-only || root.selected-folder-path != "" ? (root.chinese ? "当前搜索、目录或筛选没有匹配的声音。" : "No sounds match the current search, folder or filters.") : (root.chinese ? "音效库中还没有声音。添加 WAV 文件夹开始使用。" : "Your library has no sounds yet. Add a WAV folder to get started."); horizontal-alignment: center; wrap: word-wrap; }
-                                Action { text-module: 2; width: 140px * Theme.ui-scale; label: root.chinese ? "清除搜索和筛选" : "Clear search & filters"; clicked => { root.query = ""; root.favorites-only = false; root.reset-filters(); root.all-library-requested(); } }
+                                if root.has-search-scope: HorizontalLayout {
+                                    alignment: center;
+                                    Action { text-module: 2; width: 140px * Theme.ui-scale; label: root.chinese ? "清除搜索和筛选" : "Clear search & filters"; clicked => { root.query = ""; root.favorites-only = false; root.reset-filters(); root.all-library-requested(); } }
+                                }
                             }
                         }
                         Rectangle { height: 34px * Theme.ui-scale; background: Theme.raised;
@@ -4746,7 +4751,10 @@ main-scroll := ScrollView {
                             if root.rows.length == 0: VerticalLayout { padding: 24px * Theme.ui-scale; alignment: center; spacing: 12px * Theme.ui-scale;
                                 Text { text: root.searching ? (root.chinese ? "正在搜索…" : "Searching…") : (root.chinese ? "这里还没有声音" : "No sounds in this view"); color: Theme.text(2, 0, Theme.ink); horizontal-alignment: center; font-size: Theme.font(18); }
                                 Label { text-module: 2; text: root.visibility-index == 1 ? (root.chinese ? "当前仅显示缺失文件，没有匹配的记录。" : "No matching missing files. Only missing records are shown.") : root.query != "" || root.filter-count > 0 || root.favorites-only || root.selected-folder-path != "" ? (root.chinese ? "当前搜索、目录或筛选没有匹配的声音。" : "No sounds match the current search, folder or filters.") : (root.chinese ? "音效库中还没有声音。添加 WAV 文件夹开始使用。" : "Your library has no sounds yet. Add a WAV folder to get started."); horizontal-alignment: center; wrap: word-wrap; }
-                                StudioAction { text-module: 2; width: 140px * Theme.ui-scale; label: root.chinese ? "清除搜索和筛选" : "Clear search & filters"; clicked => { root.query = ""; root.favorites-only = false; root.reset-filters(); root.all-library-requested(); } }
+                                if root.has-search-scope: HorizontalLayout {
+                                    alignment: center;
+                                    StudioAction { text-module: 2; width: 140px * Theme.ui-scale; label: root.chinese ? "清除搜索和筛选" : "Clear search & filters"; clicked => { root.query = ""; root.favorites-only = false; root.reset-filters(); root.all-library-requested(); } }
+                                }
                             }
                         }
                         Rectangle { height: 36px * Theme.ui-scale; background: Theme.table-footer-surface;

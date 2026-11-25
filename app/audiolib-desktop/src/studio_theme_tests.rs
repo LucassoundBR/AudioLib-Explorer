@@ -81,6 +81,34 @@ fn activate(ui: &AppWindow, label: &str) {
 }
 
 #[test]
+fn clear_search_scope_is_available_only_when_empty_results_have_scope_to_clear() {
+    init_backend();
+    for theme in [DEFAULT_LUCAS_THEME, STUDIO_THEME] {
+        let ui = fixture(false);
+        apply_theme(&ui, theme);
+        ui.show().unwrap();
+        let clear =
+            || ElementHandle::find_by_accessible_label(&ui, "Clear search & filters").next();
+        assert!(clear().is_none());
+
+        ui.set_query("no matching sounds".into());
+        i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+        assert!(clear().is_some());
+        if theme == DEFAULT_LUCAS_THEME {
+            frame(&ui, "default-lucas-empty-search");
+        }
+        ui.set_query("".into());
+        ui.set_visibility_index(1);
+        i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+        assert!(clear().is_some());
+        ui.set_visibility_index(0);
+        i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+        assert!(clear().is_none());
+        ui.hide().unwrap();
+    }
+}
+
+#[test]
 fn default_lucas_keeps_shared_peak_gain_and_adds_inline_transforms() {
     use crate::waveform_view::{WaveView, render_waveform_layers};
     use audiolib_audio::{WaveformData, WaveformPeak};
