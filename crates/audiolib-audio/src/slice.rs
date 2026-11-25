@@ -1,6 +1,7 @@
 // crates/audiolib-audio/src/slice.rs
 //! Bounded, source-frame WAV export from real local originals, independent of audition.
 use crate::{
+    AudioFade,
     decoder::Decoder,
     pcm_layout::{ByteOrder, SampleKind},
     wav::{WavInfo, read_info_reader},
@@ -271,14 +272,26 @@ pub fn export_audio_slice(
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(u64, u64),
 ) -> Result<()> {
-    export_audio_slice_ordered(source, destination, Some(range), false, cancel, progress)
+    export_edited_audio(
+        source,
+        destination,
+        Some(range),
+        false,
+        AudioFade::default(),
+        cancel,
+        progress,
+    )
 }
 
-fn export_audio_slice_ordered(
+/// Render an optional original-frame range and clip-local fades in playback
+/// order. An absent range takes the whole file from its locked source header.
+/// File ownership, precision and cancellation follow `export_audio_slice`.
+pub fn export_edited_audio(
     source: &Path,
     destination: &Path,
     range: Option<AudioFrameRange>,
     reverse: bool,
+    fade: AudioFade,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(u64, u64),
 ) -> Result<()> {
@@ -303,8 +316,16 @@ fn export_audio_slice_ordered(
             "Slice range is outside the original source frames".into(),
         ));
     }
-    if reverse && info.pcm_layout.is_none() {
-        reverse_export::export_via_pcm(&source, destination, range, cancel, progress)?;
+    if (reverse || !fade.is_empty()) && info.pcm_layout.is_none() {
+        reverse_export::export_via_pcm(
+            &source,
+            destination,
+            range,
+            reverse,
+            fade,
+            cancel,
+            progress,
+        )?;
         // Only acquire cleanup ownership after create-new export succeeded.
         let mut partial = PartialOutput {
             path: destination,
@@ -314,9 +335,7 @@ fn export_audio_slice_ordered(
         if !same_source(&before, &file.metadata()?)
             || !same_source(&before, &std::fs::metadata(&source)?)
         {
-            return Err(invalid(
-                "Original audio changed during reversed slice export",
-            ));
+            return Err(invalid("Original audio changed during slice export"));
         }
         partial.committed = true;
         return Ok(());
@@ -343,7 +362,11 @@ fn export_audio_slice_ordered(
             &mut output,
             &info,
             format,
-            PcmRange { range, reverse },
+            PcmRange {
+                range,
+                reverse,
+                fade: fade.bounded(frames),
+            },
             cancel,
             progress,
         )?;
@@ -386,6 +409,7 @@ fn export_audio_slice_ordered(
 struct PcmRange {
     range: AudioFrameRange,
     reverse: bool,
+    fade: AudioFade,
 }
 
 fn copy_pcm(
@@ -397,7 +421,11 @@ fn copy_pcm(
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(u64, u64),
 ) -> Result<()> {
-    let PcmRange { range, reverse } = plan;
+    let PcmRange {
+        range,
+        reverse,
+        fade,
+    } = plan;
     let layout = info.pcm_layout.expect("PCM export was selected");
     let align = usize::from(info.block_align);
     let width = usize::from(layout.bytes_per_sample);
@@ -427,8 +455,12 @@ fn copy_pcm(
             file.seek(SeekFrom::Start(offset))?;
         }
         file.read_exact(&mut bytes[..count * align])?;
-        for index in 0..count {
-            let index = if reverse { count - 1 - index } else { index };
+        for elapsed in 0..count {
+            let index = if reverse {
+                count - 1 - elapsed
+            } else {
+                elapsed
+            };
             let frame = &mut bytes[index * align..(index + 1) * align];
             let samples = &mut frame[..output_align];
             if matches!(layout.endian, ByteOrder::Big) {
@@ -441,12 +473,56 @@ fn copy_pcm(
                     *sample ^= 0x80;
                 }
             }
+            if !fade.is_empty() {
+                let (num, den) = fade.gain(frames, done + elapsed as u64);
+                if num != den {
+                    for sample in samples.chunks_exact_mut(width) {
+                        scale_pcm_sample(format, sample, num, den);
+                    }
+                }
+            }
             output.write_all(samples)?;
         }
         done += count as u64;
         progress(done, frames);
     }
     Ok(())
+}
+
+fn scale_pcm_sample(format: OutputFormat, sample: &mut [u8], num: u64, den: u64) {
+    if format.float {
+        let gain = num as f64 / den as f64;
+        match sample.len() {
+            4 => sample.copy_from_slice(
+                &((f64::from(f32::from_le_bytes((&*sample).try_into().unwrap())) * gain) as f32)
+                    .to_le_bytes(),
+            ),
+            8 => sample.copy_from_slice(
+                &(f64::from_le_bytes((&*sample).try_into().unwrap()) * gain).to_le_bytes(),
+            ),
+            _ => unreachable!("validated float layout"),
+        }
+        return;
+    }
+    let width = sample.len();
+    let padding = u32::from(format.bytes * 8 - format.valid_bits);
+    let centered = if width == 1 {
+        i32::from(sample[0]) - 128
+    } else {
+        let mut word = [0; 4];
+        word[..width].copy_from_slice(sample);
+        let shift = 32 - width * 8;
+        (i32::from_le_bytes(word) << shift) >> shift
+    };
+    let product = i128::from(centered >> padding) * i128::from(num);
+    let divisor = i128::from(den);
+    let value = ((product + product.signum() * (divisor / 2)) / divisor) as i32;
+    let stored = value << padding;
+    if width == 1 {
+        sample[0] = (stored + 128) as u8;
+    } else {
+        sample.copy_from_slice(&stored.to_le_bytes()[..width]);
+    }
 }
 
 fn decode_float(

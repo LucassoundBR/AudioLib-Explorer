@@ -13,6 +13,97 @@ fn collect(mut decoder: AuditionDecoder) -> Vec<f32> {
 }
 
 #[test]
+fn fade_preview_matches_wav_for_selection_reverse_and_seek() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("source.wav");
+    let bytes: Vec<u8> = (0..6000)
+        .flat_map(|i| [64_000 + i * 4, -128_000 - i * 4])
+        .flat_map(|sample: i32| sample.to_le_bytes()[..3].to_vec())
+        .collect();
+    crate::tests::write_wav(&source, 48000, 2, 24, 1, &bytes, false, false);
+    let range = AudioFrameRange {
+        start_frame: 111,
+        end_frame: 5555,
+        sample_rate: 48000,
+    };
+    let fade = crate::AudioFade {
+        fade_in: 2300,
+        fade_out: 1200,
+    };
+    for reverse in [false, true] {
+        let export = temp.path().join(format!("export-{reverse}.wav"));
+        crate::export_edited_audio(
+            &source,
+            &export,
+            Some(range),
+            reverse,
+            fade,
+            &AtomicBool::new(false),
+            &mut |_, _| {},
+        )
+        .unwrap();
+        let exported = collect(
+            AuditionDecoder::new(
+                Decoder::open(&export).unwrap(),
+                48000,
+                0,
+                0,
+                Default::default(),
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            exported.len(),
+            (range.end_frame - range.start_frame) as usize * 2
+        );
+        assert_eq!(&exported[..2], &[0.0; 2]);
+        assert_eq!(&exported[exported.len() - 2..], &[0.0; 2]);
+        assert_ne!(exported[20], 0.0);
+        let reference_frame = if reverse {
+            range.end_frame - 1 - 2500
+        } else {
+            range.start_frame + 2500
+        };
+        assert_eq!(
+            exported[5000],
+            (64_000 + reference_frame * 4) as f32 / 8_388_608.0
+        );
+        for seek in [0, 1024] {
+            let frame = if reverse {
+                range.end_frame - seek
+            } else {
+                range.start_frame + seek
+            };
+            let preview = collect(
+                prepare_audition_decoder(
+                    Decoder::open(&source).unwrap(),
+                    48000,
+                    frame as f64 / 48000.0,
+                    0,
+                    AuditionSettings {
+                        reverse,
+                        fade,
+                        ..Default::default()
+                    },
+                    Some(range),
+                    MonitorOutput::STEREO,
+                )
+                .unwrap(),
+            );
+            let expected = &exported[seek as usize * 2..];
+            assert_eq!(preview.len(), expected.len());
+            // Audition is float, while 24-bit export rounds to half an integer step.
+            assert!(
+                preview
+                    .iter()
+                    .zip(expected)
+                    .all(|(a, b)| (a - b).abs() <= 0.51 / 8_388_608.0)
+            );
+        }
+    }
+}
+
+#[test]
 fn reverse_preview_matches_reversed_original_frames_before_resampling_and_pitch() {
     let temp = tempfile::tempdir().unwrap();
     let source = temp.path().join("source.wav");

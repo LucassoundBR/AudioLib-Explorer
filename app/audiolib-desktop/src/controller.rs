@@ -1984,6 +1984,7 @@ impl Controller {
                     stereo_pair: ui.get_audition_stereo_pair(),
                     loop_enabled: repeat,
                     reverse: c.audio.status().audition.reverse,
+                    fade: Default::default(),
                 });
             if let Some(settings) = settings.filter(|settings| settings.validate().is_ok()) {
                 c.command(AudioCommand::SetAudition(settings));
@@ -11740,6 +11741,7 @@ mod tests {
                 stereo_pair: false,
                 loop_enabled: true,
                 reverse: false,
+                fade: Default::default(),
             },
         };
         let expected = serde_json::to_value(&playback).unwrap();

@@ -555,6 +555,9 @@ pub(crate) struct ResampledDecoder {
     input_remaining: u64,
     /// Exclusive original frame cursor; all backwards seeks/decoding run on the worker.
     reverse_cursor: Option<u64>,
+    fade: crate::AudioFade,
+    fade_frames: u64,
+    fade_elapsed: u64,
 }
 impl ResampledDecoder {
     pub fn is_finished(&self) -> bool {
@@ -634,9 +637,36 @@ impl ResampledDecoder {
             input_per_output,
             input_remaining,
             reverse_cursor: reverse.then_some(end_frame),
+            fade: crate::AudioFade::default(),
+            fade_frames: 0,
+            fade_elapsed: 0,
         })
     }
+    pub(crate) fn with_fade(mut self, fade: crate::AudioFade, frames: u64, elapsed: u64) -> Self {
+        self.fade = fade.bounded(frames);
+        self.fade_frames = frames;
+        self.fade_elapsed = elapsed;
+        self
+    }
+
     fn read_input(&mut self, maximum: usize) -> Result<Vec<f32>> {
+        let mut samples = self.read_ordered_frames(maximum)?;
+        if !self.fade.is_empty() {
+            for frame in samples.chunks_exact_mut(self.channels) {
+                let (num, den) = self.fade.gain(self.fade_frames, self.fade_elapsed);
+                self.fade_elapsed += 1;
+                if num != den {
+                    let gain = num as f32 / den as f32;
+                    for sample in frame {
+                        *sample *= gain;
+                    }
+                }
+            }
+        }
+        Ok(samples)
+    }
+
+    fn read_ordered_frames(&mut self, maximum: usize) -> Result<Vec<f32>> {
         let frames = self.input_remaining.min(maximum as u64) as usize;
         let Some(cursor) = self.reverse_cursor else {
             return self.decoder.read(frames);

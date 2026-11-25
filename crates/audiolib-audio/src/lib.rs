@@ -8,6 +8,7 @@ mod aiff_metadata;
 mod decoder;
 #[cfg(feature = "playback")]
 mod engine;
+mod fade;
 #[cfg(test)]
 mod format_pipeline_tests;
 mod list_waveform;
@@ -26,13 +27,14 @@ mod wav_metadata;
 mod waveform;
 #[cfg(feature = "playback")]
 pub use audition::AuditionSettings;
+pub use fade::AudioFade;
 pub use list_waveform::{
     LIST_WAVEFORM_ZOOM_LEVEL, list_samples_per_pixel, list_waveform_with_cancel,
     merge_list_channels, quantize_list_peak,
 };
 pub use slice::{
-    PcmWaveSlice, export_audio_slice, export_reversed_audio_file, export_reversed_audio_slice,
-    pcm_wave_slice,
+    PcmWaveSlice, export_audio_slice, export_edited_audio, export_reversed_audio_file,
+    export_reversed_audio_slice, pcm_wave_slice,
 };
 pub use source::{
     ByteSource, SourceBuffer, SourceOpener, is_stream_source, register_buffered_stream_source,

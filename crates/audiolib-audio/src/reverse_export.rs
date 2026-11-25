@@ -20,7 +20,15 @@ pub fn export_reversed_audio_slice(
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(u64, u64),
 ) -> Result<()> {
-    export_audio_slice_ordered(source, destination, Some(range), true, cancel, progress)
+    export_edited_audio(
+        source,
+        destination,
+        Some(range),
+        true,
+        AudioFade::default(),
+        cancel,
+        progress,
+    )
 }
 
 /// Reverse the entire original, deriving its frame range from the locked source
@@ -32,7 +40,15 @@ pub fn export_reversed_audio_file(
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(u64, u64),
 ) -> Result<()> {
-    export_audio_slice_ordered(source, destination, None, true, cancel, progress)
+    export_edited_audio(
+        source,
+        destination,
+        None,
+        true,
+        AudioFade::default(),
+        cancel,
+        progress,
+    )
 }
 
 struct Spool {
@@ -80,6 +96,8 @@ pub(super) fn export_via_pcm(
     source: &Path,
     destination: &Path,
     range: AudioFrameRange,
+    reverse: bool,
+    fade: AudioFade,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(u64, u64),
 ) -> Result<()> {
@@ -87,7 +105,7 @@ pub(super) fn export_via_pcm(
     // Preserve the existing integer FLAC decoder rather than rounding through f32.
     export_audio_slice(source, &spool.file, range, cancel, &mut |_, _| {})?;
     cancelled(cancel)?;
-    export_audio_slice_ordered(
+    export_edited_audio(
         &spool.file,
         destination,
         Some(AudioFrameRange {
@@ -95,7 +113,8 @@ pub(super) fn export_via_pcm(
             end_frame: range.end_frame - range.start_frame,
             sample_rate: range.sample_rate,
         }),
-        true,
+        reverse,
+        fade,
         cancel,
         progress,
     )

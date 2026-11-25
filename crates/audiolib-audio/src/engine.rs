@@ -236,6 +236,13 @@ pub enum AudioCommand {
     ClearRange,
     SetVolume(f32),
     SetAudition(AuditionSettings),
+    /// Apply fades only if this exact loaded clip still owns playback.
+    #[serde(skip)]
+    SetFade {
+        expected_generation: u64,
+        range: Option<AudioFrameRange>,
+        fade: crate::AudioFade,
+    },
     /// Toggle the current direction in command order, retaining all other transforms.
     ToggleReverse,
     /// Acknowledge after all preceding control commands have completed.
@@ -1330,21 +1337,25 @@ fn prepare_audition_decoder(
     output: MonitorOutput,
 ) -> Result<AuditionDecoder> {
     let rate = decoder.info.metadata.sample_rate;
-    let bounds = if let Some(range) = range {
+    let clip = if let Some(range) = range {
         let mapped = range.map_inward(rate, decoder.info.metadata.frames)?;
-        let frame = ((position * f64::from(rate)).round() as u64)
-            .clamp(mapped.start_frame, mapped.end_frame);
-        if settings.reverse {
-            mapped.start_frame..frame
-        } else {
-            frame..mapped.end_frame
-        }
-    } else if settings.reverse {
-        0..(position * f64::from(rate)).round() as u64
+        mapped.start_frame..mapped.end_frame
     } else {
-        (position * f64::from(rate)) as u64..decoder.info.metadata.frames
+        0..decoder.info.metadata.frames
     };
-    AuditionDecoder::routed(decoder, output_rate, bounds, pair, settings, output)
+    let cursor = position * f64::from(rate);
+    let frame = if range.is_some() || settings.reverse {
+        cursor.round() as u64
+    } else {
+        cursor as u64
+    }
+    .clamp(clip.start, clip.end);
+    let bounds = if settings.reverse {
+        clip.start..frame
+    } else {
+        frame..clip.end
+    };
+    AuditionDecoder::routed(decoder, output_rate, bounds, clip, pair, settings, output)
 }
 
 struct Worker {
@@ -1903,6 +1914,7 @@ impl Worker {
                 self.suspend_output()?;
                 self.needs_recovery = false;
                 let previous = self.snapshot();
+                self.config.audition.fade = crate::AudioFade::default();
                 if previous.file_path.as_ref() != Some(&path) {
                     self.config.audition.stereo_pair = false;
                     self.config.audition.mono = false;
@@ -2131,17 +2143,23 @@ impl Worker {
                 } else {
                     range.start_seconds()
                 };
+                let mut audition = self.config.audition;
+                if status.playback_range != Some(range) {
+                    audition.fade = crate::AudioFade::default();
+                }
                 if let Some(output) = &mut self.output {
                     output.reset_source(
                         || Ok(decoder),
                         position,
                         self.config.source_pair,
                         false,
-                        self.config.audition,
+                        audition,
                         Some(range),
                     )?;
                 }
+                self.config.audition = audition;
                 self.update_transport(|status| {
+                    status.audition = audition;
                     status.playback_range = Some(range);
                     status.position = position;
                     // Play must resume the newly prepared range even if the old source ended.
@@ -2161,17 +2179,23 @@ impl Worker {
                     .as_ref()
                     .map_or(status.position, |o| o.position())
                     .clamp(playback_bounds(&status).0, playback_bounds(&status).1);
+                let audition = AuditionSettings {
+                    fade: crate::AudioFade::default(),
+                    ..self.config.audition
+                };
                 if let Some(output) = &mut self.output {
                     output.reset_source(
                         || Decoder::open(status.file_path.as_ref().unwrap()),
                         position,
                         self.config.source_pair,
                         status.state == PlaybackState::Playing,
-                        self.config.audition,
+                        audition,
                         None,
                     )?;
                 }
+                self.config.audition = audition;
                 self.update_transport(|status| {
+                    status.audition = audition;
                     status.playback_range = None;
                     status.position = position;
                 });
@@ -2199,31 +2223,54 @@ impl Worker {
                     ..self.config.audition
                 }))?;
             }
-            AudioCommand::SetAudition(settings) => {
-                settings.validate()?;
+            AudioCommand::SetAudition(_) | AudioCommand::SetFade { .. } => {
                 let old = self.config.audition;
+                let settings = match command {
+                    AudioCommand::SetAudition(settings) => AuditionSettings {
+                        fade: old.fade,
+                        ..settings
+                    },
+                    AudioCommand::SetFade {
+                        expected_generation,
+                        range,
+                        fade,
+                    } => {
+                        let status = self.snapshot();
+                        if status.generation != expected_generation
+                            || status.playback_range != range
+                            || status.file_path.is_none()
+                        {
+                            return Err(Error::Validation("Stale fade playback target".into()));
+                        }
+                        AuditionSettings { fade, ..old }
+                    }
+                    _ => unreachable!(),
+                };
+                settings.validate()?;
                 let position = if (
                     settings.pitch_semitones,
                     settings.rate,
                     settings.mono,
                     settings.stereo_pair,
                     settings.reverse,
+                    settings.fade,
                 ) != (
                     old.pitch_semitones,
                     old.rate,
                     old.mono,
                     old.stereo_pair,
                     old.reverse,
+                    old.fade,
                 ) {
                     let status = self.snapshot();
-                    if settings.reverse
+                    if (settings.reverse || !settings.fade.is_empty())
                         && status
                             .file_path
                             .as_ref()
                             .is_some_and(|path| crate::source::is_stream_source(path))
                     {
                         return Err(Error::Validation(
-                            "Reverse preview requires a local original".into(),
+                            "Reverse and fade preview require a local original".into(),
                         ));
                     }
                     let (start, end) = playback_bounds(&status);
@@ -3265,6 +3312,7 @@ mod tests {
                 stereo_pair: false,
                 loop_enabled: true,
                 reverse: false,
+                fade: Default::default(),
             };
             let mut worker = worker(PlaybackStatus {
                 generation: 8,

@@ -20,6 +20,9 @@ pub struct AuditionSettings {
     /// Play backwards in source coordinates while retaining channel order.
     #[serde(default)]
     pub reverse: bool,
+    /// Clip-local fade. Preferences and IPC audition settings omit it.
+    #[serde(skip)]
+    pub fade: crate::AudioFade,
 }
 impl Default for AuditionSettings {
     fn default() -> Self {
@@ -30,6 +33,7 @@ impl Default for AuditionSettings {
             stereo_pair: false,
             loop_enabled: false,
             reverse: false,
+            fade: crate::AudioFade::default(),
         }
     }
 }
@@ -109,6 +113,7 @@ impl AuditionDecoder {
             decoder,
             output_rate,
             start_frame..end_frame,
+            start_frame..end_frame,
             pair,
             settings,
             MonitorOutput::STEREO,
@@ -118,6 +123,7 @@ impl AuditionDecoder {
         decoder: Decoder,
         output_rate: u32,
         range: std::ops::Range<u64>,
+        clip: std::ops::Range<u64>,
         pair: u16,
         mut settings: AuditionSettings,
         output: MonitorOutput,
@@ -157,20 +163,29 @@ impl AuditionDecoder {
         } else {
             None
         };
-        Ok(Self {
-            source: if settings.reverse {
-                ResampledDecoder::new_directional(
-                    decoder,
-                    output_rate,
-                    start_frame,
-                    end_frame,
-                    true,
-                )?
-            } else if end_frame == metadata.frames {
-                ResampledDecoder::new(decoder, output_rate, start_frame)?
+        let source = if !settings.fade.is_empty() {
+            let elapsed = if settings.reverse {
+                clip.end - end_frame
             } else {
-                ResampledDecoder::new_bounded(decoder, output_rate, start_frame, end_frame)?
-            },
+                start_frame - clip.start
+            };
+            ResampledDecoder::new_directional(
+                decoder,
+                output_rate,
+                start_frame,
+                end_frame,
+                settings.reverse,
+            )?
+            .with_fade(settings.fade, clip.end - clip.start, elapsed)
+        } else if settings.reverse {
+            ResampledDecoder::new_directional(decoder, output_rate, start_frame, end_frame, true)?
+        } else if end_frame == metadata.frames {
+            ResampledDecoder::new(decoder, output_rate, start_frame)?
+        } else {
+            ResampledDecoder::new_bounded(decoder, output_rate, start_frame, end_frame)?
+        };
+        Ok(Self {
+            source,
             channels,
             pcm_channels,
             output,
@@ -336,6 +351,7 @@ mod tests {
                 Decoder::open(&path).unwrap(),
                 48000,
                 5..12,
+                5..12,
                 1,
                 settings,
                 output,
@@ -360,6 +376,7 @@ mod tests {
         let mut decoder = AuditionDecoder::routed(
             Decoder::open(&path).unwrap(),
             48000,
+            0..4,
             0..4,
             0,
             AuditionSettings {
@@ -398,6 +415,7 @@ mod tests {
             let mut decoder = AuditionDecoder::routed(
                 Decoder::open(&path).unwrap(),
                 48000,
+                0..24000,
                 0..24000,
                 0,
                 AuditionSettings {
