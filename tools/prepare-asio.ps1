@@ -1,6 +1,6 @@
 # tools/prepare-asio.ps1
 [CmdletBinding()]
-param([string]$ClangDirectory = 'C:\Program Files\LLVM\bin')
+param([string]$ClangDirectory = $(if ($env:LIBCLANG_PATH) { $env:LIBCLANG_PATH } else { 'C:\Program Files\LLVM\bin' }))
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
 $sdkRoot = Join-Path $taskRoot 'tools/.build-tools/asio-2.3.4'
