@@ -2,6 +2,7 @@
 //! Source-bound Waveform ranges, ordered audition and durable native drag exports.
 use super::status_feedback::AudioActivity;
 use super::*;
+use audiolib_audio::AudioFade;
 use audiolib_core::AudioFrameRange;
 #[cfg(test)]
 #[path = "waveform_selection_tests.rs"]
@@ -196,6 +197,7 @@ struct Selection {
     render_cancel: Arc<AtomicBool>,
     preview_cancel: Arc<AtomicBool>,
     reverse: bool,
+    fade: AudioFade,
 }
 
 impl Selection {
@@ -270,15 +272,12 @@ impl SliceOriginal {
                 return save().map_err(|e| e.to_string());
             }
         };
-        let export = if selection.reverse {
-            audiolib_audio::export_reversed_audio_slice
-        } else {
-            audiolib_audio::export_audio_slice
-        };
-        export(
+        audiolib_audio::export_edited_audio(
             path,
             destination,
-            selection.range,
+            Some(selection.range),
+            selection.reverse,
+            selection.fade,
             &selection.render_cancel,
             progress,
         )
@@ -362,6 +361,8 @@ fn selection_ui_clear(ui: &AppWindow) {
     ui.set_wave_selection_end(0.0);
     show_export_feedback(ui, ExportFeedback::Idle);
     ui.set_wave_selection_progress("".into());
+    ui.set_wave_fade_in(0.0);
+    ui.set_wave_fade_out(0.0);
 }
 
 impl Controller {
@@ -436,6 +437,8 @@ impl Controller {
         let c = self.clone();
         ui.on_wave_selection_whole_requested(move || c.commit_wave_range(None));
         let c = self.clone();
+        ui.on_wave_fade_committed(move |leading, trailing| c.commit_wave_fade(leading, trailing));
+        let c = self.clone();
         ui.on_wave_selection_cleared(move || c.clear_wave_selection());
         let c = self.clone();
         ui.on_wave_selection_cancel_requested(move || c.cancel_slice_preparation());
@@ -473,6 +476,7 @@ impl Controller {
         if !cfg!(windows)
             || !self.available()
             || ui.get_background_blocked()
+            || ui.get_wave_fade_pending()
             || self.wave_selection_gesture.load(Ordering::Acquire)
             // The current render has one staging path. Send and drag must
             // serialize its publication through the same worker guard.
@@ -481,7 +485,8 @@ impl Controller {
             return;
         }
         let busy = ReaperBusy(self.clone());
-        let reverse = self.audio.status().audition.reverse;
+        let playback = self.audio.status();
+        let reverse = playback.audition.reverse;
         if ui.get_reverse_pending() || ui.get_confirmed_reverse() != reverse {
             return;
         }
@@ -548,8 +553,19 @@ impl Controller {
                         &roots,
                     )
                     .map_err(|error| error.to_string())?;
-                    if reverse {
-                        let published = c.prepare_reversed_whole_file(&source, &path)?;
+                    let fade = if playback.playback_range.is_none()
+                        && playback
+                            .file_path
+                            .as_deref()
+                            .is_some_and(|loaded| same_path(loaded, &path))
+                    {
+                        playback.audition.fade
+                    } else {
+                        AudioFade::default()
+                    };
+                    if reverse || !fade.is_empty() {
+                        let published =
+                            c.prepare_edited_whole_file(&source, &path, reverse, fade)?;
                         destination.send(&published.path, &c.closing)
                     } else {
                         destination.send(&path, &c.closing)
@@ -574,10 +590,12 @@ impl Controller {
         });
     }
 
-    fn prepare_reversed_whole_file(
+    fn prepare_edited_whole_file(
         &self,
         source: &WaveSource,
         path: &Path,
+        reverse: bool,
+        fade: AudioFade,
     ) -> Result<PublishedSlice, String> {
         let export_directory = self.slice_directory().map_err(|error| error.to_string())?;
         std::fs::create_dir_all(&export_directory).map_err(|error| error.to_string())?;
@@ -586,9 +604,17 @@ impl Controller {
             .map_err(|error| error.to_string())?;
         let staging = crate::slice_staging::prepare_staging(&export_directory)
             .map_err(|error| error.to_string())?;
-        let rendered = staging.directory.path().join("reverse.wav");
-        audiolib_audio::export_reversed_audio_file(path, &rendered, &self.closing, &mut |_, _| {})
-            .map_err(|error| error.to_string())?;
+        let rendered = staging.directory.path().join("edited.wav");
+        audiolib_audio::export_edited_audio(
+            path,
+            &rendered,
+            None,
+            reverse,
+            fade,
+            &self.closing,
+            &mut |_, _| {},
+        )
+        .map_err(|error| error.to_string())?;
         if !self.drag_request_current(
             source.source_generation,
             source.library_generation,
@@ -596,7 +622,12 @@ impl Controller {
         ) {
             return Err("The original audio is no longer available".into());
         }
-        let stem = format!("{}-reverse", slice_stem(&source.file.filename));
+        let suffix = match (reverse, fade.is_empty()) {
+            (true, true) => "reverse",
+            (true, false) => "reverse-faded",
+            _ => "faded",
+        };
+        let stem = format!("{}-{suffix}", slice_stem(&source.file.filename));
         let mut published =
             publish_numbered_slice(&rendered, &export_directory, &stem, &self.closing)?;
         // A confirmed or uncertain delivery can leave a permanent REAPER reference.
@@ -693,16 +724,27 @@ impl Controller {
             return;
         }
         ui.set_confirmed_reverse(reverse);
+        self.refresh_slice_transform(ui, reverse, None);
+    }
+
+    fn refresh_slice_transform(
+        self: &Arc<Self>,
+        ui: &AppWindow,
+        reverse: bool,
+        fade: Option<AudioFade>,
+    ) {
         let selection = {
             let mut state = self.slice.lock().unwrap();
             let Some(mut selection) = state.selection.clone() else {
                 return;
             };
-            if selection.reverse == reverse || selection.source.remote {
+            let fade = fade.unwrap_or(selection.fade);
+            if (selection.reverse == reverse && selection.fade == fade) || selection.source.remote {
                 return;
             }
             selection.render_cancel.store(true, Ordering::Release);
             selection.reverse = reverse;
+            selection.fade = fade;
             selection.render_cancel = Arc::new(AtomicBool::new(false));
             state.ready = None;
             state.published = None;
@@ -712,6 +754,94 @@ impl Controller {
         };
         show_export_feedback(ui, ExportFeedback::Preparing);
         self.prepare_wave_slice(selection);
+    }
+
+    fn commit_wave_fade(self: &Arc<Self>, leading: f32, trailing: f32) {
+        let Some(ui) = self.ui.upgrade() else { return };
+        if !self.available()
+            || ui.get_wave_fade_pending()
+            || ui.get_reverse_pending()
+            || self.drag_busy.load(Ordering::Acquire)
+            || !leading.is_finite()
+            || !trailing.is_finite()
+        {
+            return;
+        }
+        let (source, range, revision) = {
+            let state = self.slice.lock().unwrap();
+            let Some(source) = state.source.clone().filter(|source| !source.remote) else {
+                return;
+            };
+            (
+                source,
+                state.selection.as_ref().map(|selection| selection.range),
+                state.revision,
+            )
+        };
+        let status = self.audio.status();
+        if status.playback_range != range
+            || status.sample_rate == 0
+            || status.sample_rate != source.file.sample_rate
+            || !status
+                .file_path
+                .as_deref()
+                .is_some_and(|path| same_path(path, Path::new(&source.file.file_path)))
+        {
+            return;
+        }
+        let rate = f64::from(status.sample_rate);
+        let frames = range.map_or_else(
+            || source.total_frames(),
+            |range| range.end_frame - range.start_frame,
+        );
+        let fade = AudioFade {
+            fade_in: (f64::from(leading) * rate).round() as u64,
+            fade_out: (f64::from(trailing) * rate).round() as u64,
+        }
+        .bounded(frames);
+        if status.audition.fade == fade {
+            return;
+        }
+        let generation = status.generation;
+        let completion = match self.audio.enqueue_with_ack(AudioCommand::SetFade {
+            expected_generation: generation,
+            range,
+            fade,
+        }) {
+            Ok(completion) => completion,
+            Err(error) => {
+                ui.set_status(error.to_string().into());
+                return;
+            }
+        };
+        ui.set_wave_fade_pending(true);
+        let c = self.clone();
+        std::thread::spawn(move || {
+            let result = completion.wait_until_completed();
+            let controller = c.clone();
+            post(c.ui.clone(), move |ui| {
+                ui.set_wave_fade_pending(false);
+                let status = controller.audio.status();
+                let current = {
+                    let state = controller.slice.lock().unwrap();
+                    state.revision == revision
+                        && state
+                            .source
+                            .as_ref()
+                            .is_some_and(|now| now.key == source.key)
+                };
+                if !current || status.generation != generation || status.playback_range != range {
+                    return;
+                }
+                if let Err(error) = result {
+                    ui.set_status(error.to_string().into());
+                    return;
+                }
+                ui.set_wave_fade_in((fade.fade_in as f64 / rate) as f32);
+                ui.set_wave_fade_out((fade.fade_out as f64 / rate) as f32);
+                controller.refresh_slice_transform(&ui, status.audition.reverse, Some(fade));
+            });
+        });
     }
 
     fn slice_directory(&self) -> audiolib_core::Result<PathBuf> {
@@ -771,7 +901,7 @@ impl Controller {
         let Some(ui) = self.ui.upgrade() else {
             return;
         };
-        if !ui.get_waveform_ready() {
+        if !ui.get_waveform_ready() || ui.get_wave_fade_pending() {
             return;
         }
         let source = self.slice.lock().unwrap().source.clone();
@@ -813,7 +943,16 @@ impl Controller {
         .store(true, Ordering::Release);
         let selection = {
             let mut state = self.slice.lock().unwrap();
+            let mut fade = AudioFade::default();
             if let Some(old) = state.selection.take() {
+                let status = self.audio.status();
+                if old.range == range
+                    && old.source.key == source.key
+                    && status.playback_range == Some(range)
+                    && status.audition.fade == old.fade
+                {
+                    fade = old.fade;
+                }
                 old.invalidate();
             }
             state.revision += 1;
@@ -822,6 +961,7 @@ impl Controller {
             state.drag_requested = false;
             let selection = Selection {
                 reverse: ui.get_confirmed_reverse() && !source.remote,
+                fade,
                 source,
                 range,
                 revision: state.revision,
@@ -837,6 +977,9 @@ impl Controller {
         ui.set_wave_selection_active(true);
         ui.set_wave_selection_start(range.start_seconds() as f32);
         ui.set_wave_selection_end(range.end_seconds() as f32);
+        let rate = f64::from(range.sample_rate);
+        ui.set_wave_fade_in((selection.fade.fade_in as f64 / rate) as f32);
+        ui.set_wave_fade_out((selection.fade.fade_out as f64 / rate) as f32);
         show_export_feedback(&ui, ExportFeedback::Preparing);
         ui.set_wave_selection_progress(
             if self.chinese.load(Ordering::Acquire) {
@@ -1441,7 +1584,12 @@ impl Controller {
     }
 
     fn drag_wave_selection(self: &Arc<Self>) {
-        if !self.available() {
+        if !self.available()
+            || self
+                .ui
+                .upgrade()
+                .is_some_and(|ui| ui.get_wave_fade_pending())
+        {
             return;
         }
         let mut state = self.slice.lock().unwrap();

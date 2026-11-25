@@ -210,6 +210,7 @@ fn selection(
         render_cancel: Arc::new(AtomicBool::new(false)),
         preview_cancel: Arc::new(AtomicBool::new(false)),
         reverse: false,
+        fade: AudioFade::default(),
     }
 }
 
@@ -233,7 +234,9 @@ fn child_reverse_prepared_slice() {
         let c = f.c.clone();
         wait_for(&f.ui, move || {
             let state = c.slice.lock().unwrap();
-            state.ready.is_some() && state.workers == 0
+            state.ready.is_some()
+                && state.workers == 0
+                && c.ui.upgrade().is_some_and(|ui| !ui.get_wave_fade_pending())
         });
     };
     wait_for_render();
@@ -273,6 +276,39 @@ fn child_reverse_prepared_slice() {
             .collect();
         assert_eq!(samples, (200..600).rev().collect::<Vec<i16>>());
     }
+    f.c.commit_wave_fade(0.01, 0.02);
+    wait_for_render();
+    assert!(selection.render_cancel.load(Ordering::Acquire));
+    let (faded, ready) = {
+        let state = f.c.slice.lock().unwrap();
+        (
+            state.selection.clone().unwrap(),
+            state.ready.clone().unwrap(),
+        )
+    };
+    assert!(faded.reverse);
+    assert_eq!(
+        faded.fade,
+        AudioFade {
+            fade_in: 10,
+            fade_out: 20
+        }
+    );
+    assert_eq!(f.c.audio.status().audition.fade, faded.fade);
+    let published = ready.publish(&faded).unwrap();
+    let bytes = std::fs::read(&published.path).unwrap();
+    let pcm = bytes.windows(4).position(|chunk| chunk == b"data").unwrap() + 8;
+    let sample = |frame: usize| {
+        i16::from_le_bytes(
+            bytes[pcm + frame * 2..pcm + frame * 2 + 2]
+                .try_into()
+                .unwrap(),
+        )
+    };
+    assert_eq!(
+        [sample(0), sample(5), sample(100), sample(394), sample(399)],
+        [0, 297, 499, 51, 0]
+    );
 }
 
 #[test]

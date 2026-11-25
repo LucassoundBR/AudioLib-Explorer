@@ -1849,7 +1849,7 @@ export component AppWindow inherits Window {
     in-out property <bool> reaper-auto-focus: false;
     callback reaper-send-requested();
     callback reaper-setup-requested();
-    private property <bool> reaper-send-ready: root.reaper-supported && !root.reverse-pending &&
+    private property <bool> reaper-send-ready: root.reaper-supported && !root.reverse-pending && !root.wave-fade-pending &&
         (root.wave-selection-active ? !root.wave-selection-preparing : root.has-selection && !root.selected-missing && !root.remote-mode);
     in property <bool> confirmed-reverse: false;
     in property <bool> reverse-pending: false;
@@ -1902,6 +1902,10 @@ export component AppWindow inherits Window {
     in property <float> wave-selection-start: 0;
     in property <float> wave-selection-end: 0;
     in property <string> wave-selection-identity;
+    in property <float> wave-fade-in;
+    in property <float> wave-fade-out;
+    in property <bool> wave-fade-pending;
+    callback wave-fade-committed(float,float);
     in property <bool> wave-selection-preparing: false;
     in property <string> wave-selection-progress;
     // Export readiness is independent of the operation under the pointer.
@@ -4099,6 +4103,8 @@ main-scroll := ScrollView {
             selection-pointer-feedback-changed => { root.wave-pointer-feedback-changed(); }
             selection-shift-held: root.wave-selection-shift-held;
             selection-committed(start, end) => { root.wave-selection-committed(start, end); }
+            fade-edit: { enabled: root.audio-ready && !root.remote-mode && !root.reverse-pending && !root.reaper-busy, leading: root.wave-fade-in, trailing: root.wave-fade-out };
+            fade-committed(leading, trailing) => { if !root.wave-fade-pending { root.wave-fade-committed(leading, trailing); } }
             select-whole => { root.wave-selection-whole-requested(); }
             selection-cleared => { root.wave-selection-cleared(); }
             selection-drag-requested => { root.wave-selection-drag-requested(); }
@@ -5005,6 +5011,8 @@ main-scroll := ScrollView {
             selection-pointer-feedback-changed => { root.wave-pointer-feedback-changed(); }
             selection-shift-held: root.wave-selection-shift-held;
             selection-committed(start, end) => { root.wave-selection-committed(start, end); }
+            fade-edit: { enabled: root.audio-ready && !root.remote-mode && !root.reverse-pending && !root.reaper-busy, leading: root.wave-fade-in, trailing: root.wave-fade-out };
+            fade-committed(leading, trailing) => { if !root.wave-fade-pending { root.wave-fade-committed(leading, trailing); } }
             select-whole => { root.wave-selection-whole-requested(); }
             selection-cleared => { root.wave-selection-cleared(); }
             selection-drag-requested => { root.wave-selection-drag-requested(); }

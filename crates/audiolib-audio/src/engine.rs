@@ -2315,9 +2315,10 @@ impl Worker {
                     self.update(confirm);
                 }
             }
-            AudioCommand::Configure(config) => {
+            AudioCommand::Configure(mut config) => {
                 config.validate()?;
                 let previous = self.config.clone();
+                config.audition.fade = previous.audition.fade;
                 let playing = self.snapshot().state == PlaybackState::Playing;
                 let position = self.output.as_ref().map(|output| output.position());
                 self.close_output();

@@ -1141,6 +1141,71 @@ fn waveform_double_click_selects_the_entire_source_while_zoomed_or_reversed() {
 }
 
 #[test]
+fn fade_handles_commit_in_playback_order_and_escape_discards_the_draft() {
+    i_slint_backend_testing::init_no_event_loop();
+    for modern in [false, true] {
+        let ui = window(modern);
+        ui.set_play_duration(20.0);
+        ui.set_wave_source_duration(20.0);
+        let observed = Rc::new(RefCell::new(Vec::new()));
+        let changes = observed.clone();
+        let weak = ui.as_weak();
+        ui.on_wave_fade_committed(move |leading, trailing| {
+            changes.borrow_mut().push((leading, trailing));
+            let ui = weak.upgrade().unwrap();
+            ui.set_wave_fade_in(leading);
+            ui.set_wave_fade_out(trailing);
+        });
+        let ranges = accept_ranges(&ui);
+        let drag = |label: &str, fraction: f32, cancel: bool| {
+            settle();
+            let handle = ElementHandle::find_by_accessible_label(&ui, label)
+                .next()
+                .unwrap();
+            let origin = handle.absolute_position();
+            let size = handle.size();
+            let start =
+                LogicalPosition::new(origin.x + size.width / 2.0, origin.y + size.height / 2.0);
+            let end = LogicalPosition::new(
+                start.x + (point(&ui, 1.0).x - point(&ui, 0.0).x) * fraction,
+                start.y,
+            );
+            moved(&ui, start);
+            ui.window().dispatch_event(WindowEvent::PointerPressed {
+                position: start,
+                button: PointerEventButton::Left,
+            });
+            moved(&ui, end);
+            assert!(ui.get_wave_selection_gesture());
+            if cancel {
+                escape(&ui);
+            }
+            ui.window().dispatch_event(WindowEvent::PointerReleased {
+                position: end,
+                button: PointerEventButton::Left,
+            });
+            settle();
+        };
+        drag("Fade In", 0.05, false);
+        near(observed.borrow()[0], (1.0, 0.0));
+
+        ui.set_wave_fade_in(0.0);
+        ui.set_wave_selection_active(true);
+        ui.set_wave_selection_start(4.0);
+        ui.set_wave_selection_end(14.0);
+        ui.set_confirmed_reverse(true);
+        drag("Fade In", 0.1, false);
+        drag("Fade Out", -0.15, false);
+        drag("Fade In", 0.15, true);
+        assert_eq!(observed.borrow().len(), 3);
+        near(observed.borrow()[1], (2.0, 0.0));
+        near(observed.borrow()[2], (2.0, 3.0));
+        assert!(ranges.borrow().is_empty());
+        ui.hide().unwrap();
+    }
+}
+
+#[test]
 fn reverse_waveform_maps_selection_seek_and_zoom_to_the_original() {
     i_slint_backend_testing::init_no_event_loop();
     for modern in [false, true] {

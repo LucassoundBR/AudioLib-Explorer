@@ -5,6 +5,7 @@ import { Theme, ThemedCheckBox, ThemedSlider as Slider } from "theme.slint";
 /// One time-ruler tick: its position as a fraction of the visible range and, on
 /// major ticks, the time label drawn beside it.
 export struct RulerTick { fraction: float, label: string, major: bool, label-index: int }
+export struct WaveFade { enabled: bool, leading: float, trailing: float }
 
 // Text formats shared by the hover, scrub and remaining-time readouts.
 global Clock {
@@ -1014,6 +1015,8 @@ component WaveformPointer inherits Image {
 
 // Plot coordinates map directly to source time; the grip occupies a separate dock slot.
 component WaveSelectionOverlay inherits Rectangle {
+    in property <WaveFade> fade-edit;
+    callback fade-committed(float,float);
     in property <bool> enabled;
     in property <bool> seek-enabled;
     in property <string> seek-clock;
@@ -1062,8 +1065,10 @@ component WaveSelectionOverlay inherits Rectangle {
         : root.mode == 3 ? (root.draft-end >= root.draft-start ? 5 : 4)
         : root.mode == 5 || root.mode == 7 ? 7
         : root.mode == 4 || root.mode == 6 ? 7 : root.mode == 8 ? 9
+        : root.mode == 9 ? 12 : root.mode == 10 ? 13
         : !root.enabled ? (root.seek-enabled ? 9 : 10)
         : grip.has-hover ? 6 : root.shift-held ? 1
+        : root.fade-hit == 1 ? 12 : root.fade-hit == 2 ? 13
         : root.near-left || root.near-right ? (root.left-wins ? 4 : 5)
         : root.inside ? 6 : 1;
     property <image> empty-image;
@@ -1082,7 +1087,8 @@ component WaveSelectionOverlay inherits Rectangle {
     out property <float> pointer-scale: 1;
     // The backend sees a stable stock cursor in native mode, so leaving the
     // owner restores the stock cursor rather than a hidden-cursor state.
-    out property <MouseCursor> cursor: root.pointer-kind == 0 || root.pointer-kind == 11 ? default : root.native-cursor ? crosshair : none;
+    out property <MouseCursor> cursor: root.pointer-kind == 12 || root.pointer-kind == 13 ? ew-resize
+        : root.pointer-kind == 0 || root.pointer-kind == 11 ? default : root.native-cursor ? crosshair : none;
     init => { root.cursor-changed(root.cursor); root.pointer-feedback-changed(); }
     changed cursor => { root.cursor-changed(root.cursor); }
     changed pointer-kind => { root.pointer-feedback-changed(); }
@@ -1091,7 +1097,7 @@ component WaveSelectionOverlay inherits Rectangle {
     changed pointer-hotspot-y => { root.pointer-feedback-changed(); }
     changed pointer-scale => { root.pointer-feedback-changed(); }
     changed native-cursor => { root.pointer-feedback-changed(); }
-    // 1 draw, 2/3 resize, 4/5 interior pending/requested, 6/7 grip, 8 seek-only.
+    // 1 draw, 2/3 resize, 4/5 interior pending/requested, 6/7 grip, 8 seek-only, 9/10 fades.
     property <int> mode: 0;
     property <length> down-x;
     property <length> down-y;
@@ -1100,6 +1106,22 @@ component WaveSelectionOverlay inherits Rectangle {
     property <float> anchor;
     property <float> draft-start;
     property <float> draft-end;
+    property <float> draft-leading;
+    property <float> draft-trailing;
+    property <float> fade-start: root.selection-active ? root.selection-start : 0;
+    property <float> fade-end: root.selection-active ? root.selection-end : root.duration;
+    property <length> fade-left-x: (root.fade-start - root.view-start) / root.span * root.width;
+    property <length> fade-right-x: (root.fade-end - root.view-start) / root.span * root.width;
+    property <length> fade-reach: max(0px, min(13px * Theme.ui-scale, (root.fade-right-x - root.fade-left-x) / 2));
+    property <length> fade-height: 12px * Theme.ui-scale;
+    property <bool> fade-visible: root.fade-edit.enabled && root.enabled && !root.editing && root.fade-end > root.fade-start;
+    property <bool> left-fade-visible: root.fade-visible && root.fade-left-x >= 0px && root.fade-left-x < root.width;
+    property <bool> right-fade-visible: root.fade-visible && root.fade-right-x > 0px && root.fade-right-x <= root.width;
+    property <int> fade-hit: hit.mouse-y >= 0px && hit.mouse-y < root.fade-height
+        ? (root.left-fade-visible && hit.mouse-x >= root.fade-left-x && hit.mouse-x < root.fade-left-x + root.fade-reach ? 1
+        : root.right-fade-visible && hit.mouse-x <= root.fade-right-x && hit.mouse-x >= root.fade-right-x - root.fade-reach ? 2 : 0) : 0;
+    property <float> shown-leading: root.mode == 9 ? root.draft-leading : root.fade-edit.leading;
+    property <float> shown-trailing: root.mode == 10 ? root.draft-trailing : root.fade-edit.trailing;
     property <bool> travelled: false;
     property <bool> is-preparing: root.preparing || root.export-state == 1;
     property <bool> editing: root.mode > 0 && root.mode < 4;
@@ -1144,6 +1166,8 @@ component WaveSelectionOverlay inherits Rectangle {
         : root.pointer-kind == 9 ? (root.chinese ? "单击定位播放 · 波形完成后可框选" : "Click to seek and play · Select when Waveform is ready")
         : root.pointer-kind == 10 ? (root.chinese ? "波形暂不可操作" : "Waveform is currently unavailable")
         : root.pointer-kind == 11 ? (root.chinese ? "鼠标显示复制标记时松开" : "Release when the pointer shows Copy")
+        : root.pointer-kind == 12 ? (root.chinese ? "淡入 · " : "Fade In · ") + round(root.shown-leading * 1000) + " ms"
+        : root.pointer-kind == 13 ? (root.chinese ? "淡出 · " : "Fade Out · ") + round(root.shown-trailing * 1000) + " ms"
         : root.shift-held ? (root.chinese ? "拖动重新框选 · 松开自动试听" : "Drag a new range · Release to audition")
         : "";
     property <string> export-label: root.is-preparing ? (root.progress-text != "" ? root.progress-text : (root.chinese ? "正在准备 WAV…" : "Preparing WAV…"))
@@ -1159,10 +1183,18 @@ component WaveSelectionOverlay inherits Rectangle {
     changed enabled => { if !root.enabled && root.mode != 8 { root.cancel-gesture(); } }
     changed seek-enabled => { if !root.seek-enabled && root.mode == 8 { root.cancel-gesture(); } }
     changed seek-clock => { if root.mode == 8 { root.cancel-gesture(); } }
+    changed fade-visible => { if !root.fade-visible && root.mode >= 9 { root.cancel-gesture(); } }
     function source-time(x: length) -> float {
         return clamp(root.captured-start + clamp(x / max(1px, root.down-width), 0, 1) * (root.captured-end - root.captured-start), 0, root.captured-limit);
     }
     function move-pointer() {
+        if root.mode == 9 || root.mode == 10 {
+            let delta = (hit.mouse-x - root.down-x) / max(1px, root.down-width) * (root.captured-end - root.captured-start);
+            let length = root.fade-end - root.fade-start;
+            if root.mode == 9 { root.draft-leading = clamp(root.fade-edit.leading + delta, 0, max(0, length - root.draft-trailing)); }
+            else { root.draft-trailing = clamp(root.fade-edit.trailing - delta, 0, max(0, length - root.draft-leading)); }
+            return;
+        }
         if root.mode == 0 || root.mode >= 5 { return; }
         if abs(hit.mouse-x - root.down-x) >= 6px || abs(hit.mouse-y - root.down-y) >= 6px { root.travelled = true; }
         if root.mode == 4 {
@@ -1190,11 +1222,44 @@ component WaveSelectionOverlay inherits Rectangle {
         Rectangle { x: parent.width - self.width; y: 0px; width: root.handle-reach; height: root.handle-stroke; background: parent.background; accessible-role: none; }
         Rectangle { x: parent.width - self.width; y: parent.height - self.height; width: root.handle-reach; height: root.handle-stroke; background: parent.background; accessible-role: none; }
     }
+    if root.fade-visible: Rectangle {
+        x: 0px; y: 0px; width: root.width; height: root.height;
+        clip: true;
+        if root.shown-leading > 0: Path {
+            x: root.fade-left-x; y: 0px;
+            width: root.shown-leading / root.span * root.width; height: root.height;
+            viewbox-width: 100; viewbox-height: 100;
+            stroke: Theme.accent-hover; stroke-width: 1px;
+            MoveTo { x: 0; y: 100; }
+            LineTo { x: 100; y: 0; }
+        }
+        if root.shown-trailing > 0: Path {
+            x: root.fade-right-x - self.width; y: 0px;
+            width: root.shown-trailing / root.span * root.width; height: root.height;
+            viewbox-width: 100; viewbox-height: 100;
+            stroke: Theme.accent-hover; stroke-width: 1px;
+            MoveTo { x: 0; y: 0; }
+            LineTo { x: 100; y: 100; }
+        }
+        if root.left-fade-visible: Rectangle {
+            x: root.fade-left-x; y: 0px; width: root.fade-reach; height: root.fade-height;
+            background: root.pointer-kind == 12 ? Theme.accent-hover : Theme.accent;
+            border-radius: 2px;
+            accessible-role: text; accessible-label: root.chinese ? "淡入" : "Fade In";
+        }
+        if root.right-fade-visible: Rectangle {
+            x: root.fade-right-x - root.fade-reach; y: 0px; width: root.fade-reach; height: root.fade-height;
+            background: root.pointer-kind == 13 ? Theme.accent-hover : Theme.accent;
+            border-radius: 2px;
+            accessible-role: text; accessible-label: root.chinese ? "淡出" : "Fade Out";
+        }
+    }
     hit := TouchArea {
         x: 0px; y: 0px; width: parent.width; height: root.height;
         // Always track hover, including unavailable/seek-only plots. Every
         // mutation below separately checks the actual operation's availability.
-        mouse-cursor: root.native-cursor ? crosshair : (root.pointer-kind > 0 && root.pointer-kind < 11 ? none : default);
+        mouse-cursor: root.pointer-kind == 12 || root.pointer-kind == 13 ? ew-resize
+            : root.native-cursor ? crosshair : (root.pointer-kind > 0 && root.pointer-kind < 11 ? none : default);
         double-clicked => {
             // Slint delivers this before the final pointer-up. Retire the click
             // gesture so that release cannot issue an extra seek.
@@ -1218,6 +1283,11 @@ component WaveSelectionOverlay inherits Rectangle {
                 root.travelled = false;
                 if !root.enabled { root.mode = 8; }
                 else if event.modifiers.shift { root.mode = 1; }
+                else if root.fade-hit != 0 {
+                    root.draft-leading = root.fade-edit.leading;
+                    root.draft-trailing = root.fade-edit.trailing;
+                    root.mode = 8 + root.fade-hit;
+                }
                 else if root.near-left || root.near-right { root.mode = root.left-wins ? 2 : 3; }
                 else { root.mode = root.inside ? 4 : 1; }
                 if root.mode == 1 { root.draft-start = root.anchor; root.draft-end = root.anchor; }
@@ -1230,7 +1300,8 @@ component WaveSelectionOverlay inherits Rectangle {
                 let resized = (mode == 2 || mode == 3) && (root.draft-start != root.selection-start || root.draft-end != root.selection-end);
                 let time = root.source-time(self.mouse-x);
                 root.cancel-gesture();
-                if ((mode == 1 && moved) || resized) && end > start { root.committed(start, end); }
+                if mode >= 9 { root.fade-committed(root.draft-leading, root.draft-trailing); }
+                else if ((mode == 1 && moved) || resized) && end > start { root.committed(start, end); }
                 else if mode == 8 || ((mode == 1 || mode == 4) && !moved) { root.seek-play(time); }
             }
         }
@@ -1346,6 +1417,8 @@ component ClassicAuditionPanel inherits Rectangle {
     in property <float> selection-start;
     in property <float> selection-end;
     in property <string> selection-identity;
+    in property <WaveFade> fade-edit;
+    callback fade-committed(float,float);
     in property <bool> selection-preparing;
     in property <int> selection-export-state;
     in property <bool> selection-native-cursor: false;
@@ -1655,6 +1728,8 @@ component ClassicAuditionPanel inherits Rectangle {
                         shift-held: root.selection-shift-held; cancel-revision: root.selection-cancel-revision;
                         committed(start, end) => { root.selection-committed(start, end); }
                         select-whole => { root.select-whole(); }
+                        fade-edit: root.fade-edit;
+                        fade-committed(leading, trailing) => { root.fade-committed(leading, trailing); }
                         drag-requested => { root.selection-drag-requested(); }
                         drag-ended => { root.selection-drag-ended(); }
                         cancel-requested => { root.selection-cancel-requested(); }
@@ -1740,6 +1815,8 @@ component WorkbenchAuditionPanel inherits Rectangle {
     in property <float> selection-start;
     in property <float> selection-end;
     in property <string> selection-identity;
+    in property <WaveFade> fade-edit;
+    callback fade-committed(float,float);
     in property <bool> selection-preparing;
     in property <int> selection-export-state;
     in property <bool> selection-native-cursor: false;
@@ -2189,6 +2266,8 @@ component WorkbenchAuditionPanel inherits Rectangle {
                         shift-held: root.selection-shift-held; cancel-revision: root.selection-cancel-revision;
                         committed(start, end) => { root.selection-committed(start, end); }
                         select-whole => { root.select-whole(); }
+                        fade-edit: root.fade-edit;
+                        fade-committed(leading, trailing) => { root.fade-committed(leading, trailing); }
                         drag-requested => { root.selection-drag-requested(); }
                         drag-ended => { root.selection-drag-ended(); }
                         cancel-requested => { root.selection-cancel-requested(); }
@@ -2313,6 +2392,8 @@ export component AuditionPanel inherits Rectangle {
     in property <float> selection-start;
     in property <float> selection-end;
     in property <string> selection-identity;
+    in property <WaveFade> fade-edit;
+    callback fade-committed(float,float);
     in property <bool> selection-preparing;
     in property <int> selection-export-state;
     in property <bool> selection-native-cursor: false;
@@ -2453,6 +2534,8 @@ export component AuditionPanel inherits Rectangle {
         selection-preparing: root.selection-preparing; selection-progress: root.selection-progress;
         selection-export-state: root.selection-export-state; selection-native-cursor: root.selection-native-cursor;
         selection-shift-held: root.selection-shift-held; selection-cancel-revision: root.selection-cancel-revision;
+        fade-edit: root.fade-edit;
+        fade-committed(leading, trailing) => { root.fade-committed(leading, trailing); }
         changed selection-gesture => { root.presenter-selection-gesture = self.selection-gesture; }
         changed selection-cursor => { root.presenter-selection-cursor = self.selection-cursor; }
         selection-cursor-changed(value) => { root.presenter-selection-cursor = value; }
@@ -2539,6 +2622,8 @@ export component AuditionPanel inherits Rectangle {
         selection-preparing: root.selection-preparing; selection-progress: root.selection-progress;
         selection-export-state: root.selection-export-state; selection-native-cursor: root.selection-native-cursor;
         selection-shift-held: root.selection-shift-held; selection-cancel-revision: root.selection-cancel-revision;
+        fade-edit: root.fade-edit;
+        fade-committed(leading, trailing) => { root.fade-committed(leading, trailing); }
         changed selection-gesture => { root.presenter-selection-gesture = self.selection-gesture; }
         changed selection-cursor => { root.presenter-selection-cursor = self.selection-cursor; }
         selection-cursor-changed(value) => { root.presenter-selection-cursor = value; }

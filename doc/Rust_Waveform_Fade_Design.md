@@ -73,9 +73,19 @@ valid bits stored in a 32-bit word. In one test, an in-memory render of a
 retained the header format, channel order and exact unity samples. This
 experiment ran outside the application's UI, renderer and audio engine.
 
-The next implementation stage should test decoded preview against an exact
-PCM reference, then verify that selecting, resizing, zooming and reversing
-keep the handles aligned. The export tests should cover mono, stereo and
-multichannel audio with zero, asymmetric and maximum durations. A final
-REAPER test with the dedicated Dummy Audio profile can compare the original
-frame range against the WAV received by button and **S**.
+The implementation compares decoded audition against a re-opened 24-bit stereo
+WAV for a nonzero selection in both directions, including a seek inside the
+leading fade. Interior samples match and ramp samples stay within half a
+24-bit quantization step, plus float tolerance. The audio package suite
+passed 211 tests.
+
+The isolated Slint test drags handles for the whole file and a reversed
+selection in both player layouts. It verifies that Escape cancels the draft
+and that editing a fade does not commit another selection. The desktop
+controller test also verifies that changing the fade retires the prepared
+Reverse export. It re-opens the WAV used for drag and REAPER send and checks
+the endpoints, ramp samples and untouched interior of the mono PCM output.
+Both tests passed in the ASIO desktop configuration without a physical stream.
+
+Live playback and final delivery to REAPER are pending interactive
+acceptance. The first implementation exposes the handles for local sounds.

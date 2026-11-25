@@ -2004,7 +2004,11 @@ impl Controller {
         let c = self.clone();
         ui.on_reverse_requested(move || {
             let Some(ui) = c.ui.upgrade() else { return };
-            if !c.available() || !ui.get_reverse_ready() || c.drag_busy.load(Ordering::Acquire) {
+            if !c.available()
+                || !ui.get_reverse_ready()
+                || ui.get_wave_fade_pending()
+                || c.drag_busy.load(Ordering::Acquire)
+            {
                 return;
             }
             let completion = match c.audio.enqueue_with_ack(AudioCommand::ToggleReverse) {
