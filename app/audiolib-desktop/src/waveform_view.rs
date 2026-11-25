@@ -19,7 +19,7 @@ pub(crate) fn mirror_preview(image: slint::Image) -> slint::Image {
 
 const SPECTRAL_BACKGROUND: [u8; 4] = [132, 144, 148, 255];
 const NORMAL_BACKGROUND: [u8; 4] = [29, 35, 40, 255];
-const LIGHT_BACKGROUND: [u8; 4] = [181, 191, 195, 255];
+const LIGHT_BACKGROUND: [u8; 4] = [162, 173, 177, 255];
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct WaveView {
@@ -271,6 +271,12 @@ pub(crate) fn render_waveform_layers(
     let channels = data.peaks.len().max(1);
     let lane = height as f32 / channels as f32;
     let gain = 10.0_f32.powf(view.gain_db.clamp(-12.0, 36.0) / 20.0);
+    let opacity = view.opacity.clamp(0.0, 1.0);
+    let center_color = if view.spectral {
+        [98, 111, 116]
+    } else {
+        [55, 66, 72]
+    };
     for (channel, peaks) in data.peaks.iter().enumerate() {
         let center = lane * (channel as f32 + 0.5);
         let amplitude = (lane * 0.44).max(1.0);
@@ -278,6 +284,7 @@ pub(crate) fn render_waveform_layers(
         let bottom = (((channel + 1) as f32 * lane) as u32)
             .saturating_sub(1)
             .min(height - 1);
+        let center_row = center.min((height - 1) as f32) as u32;
         for x in 0..width {
             let mut put = |y: u32, color: [u8; 3], coverage: u8| {
                 let index = (y * width + x) as usize;
@@ -286,15 +293,7 @@ pub(crate) fn render_waveform_layers(
                     mask[index].a = coverage;
                 }
             };
-            put(
-                center.min((height - 1) as f32) as u32,
-                if view.spectral {
-                    [98, 111, 116]
-                } else {
-                    [55, 66, 72]
-                },
-                45,
-            );
+            put(center_row, center_color, 45);
             let Some(peak) = peaks.get(x as usize * peaks.len() / width as usize) else {
                 continue;
             };
@@ -302,9 +301,11 @@ pub(crate) fn render_waveform_layers(
                 continue;
             }
             let high = (center - (peak.max * gain).clamp(-1.0, 1.0) * amplitude)
-                .clamp(top as f32, bottom as f32) as u32;
+                .clamp(top as f32, bottom as f32);
             let low = (center - (peak.min * gain).clamp(-1.0, 1.0) * amplitude)
-                .clamp(top as f32, bottom as f32) as u32;
+                .clamp(top as f32, bottom as f32);
+            let upper = high.min(low);
+            let lower = high.max(low);
             let rgb = if view.spectral {
                 spectral_color(peak.dominant_hz, peak.tonality, view.noise, view.variance)
             } else if view.light_canvas {
@@ -315,7 +316,6 @@ pub(crate) fn render_waveform_layers(
             // Spectral opacity blends with the normal BLACK peak, not light
             // gray: neither low tonality nor opacity may brighten the noise.
             let color = if view.spectral {
-                let opacity = view.opacity.clamp(0.0, 1.0);
                 rgb.map(|v| {
                     (f32::from(v) * opacity + f32::from(SPECTRAL_PEAK_BASE[0]) * (1.0 - opacity))
                         .round() as u8
@@ -324,11 +324,40 @@ pub(crate) fn render_waveform_layers(
                 rgb
             };
             let core_color = color.map(|v| (v as f32 * 0.78) as u8);
-            for y in high.min(low)..=high.max(low) {
+            let rms_height = peak.rms * gain * amplitude;
+            let first = if view.light_canvas {
+                upper.round()
+            } else {
+                upper
+            } as u32;
+            let last = if view.light_canvas {
+                lower.round()
+            } else {
+                lower
+            } as u32;
+            for y in first..=last {
                 // Slightly darker RMS core leaves transients readable without
                 // manufacturing a spectrogram or changing amplitude geometry.
-                let core = (y as f32 - center).abs() < peak.rms * gain * amplitude;
-                put(y, if core { core_color } else { color }, 255);
+                let core = (y as f32 - center).abs() < rms_height;
+                let mut pixel = if core { core_color } else { color };
+                let mut coverage = 255;
+                if view.light_canvas && (y == first || y == last) {
+                    // Blend only the boundary pixels using the fraction covered
+                    // by the envelope. Keep the measured min/max and RMS intact.
+                    let row = y as f32;
+                    let alpha = (lower.min(row + 0.5) - upper.max(row - 0.5)).clamp(0.0, 1.0);
+                    let surface = if y == center_row {
+                        center_color
+                    } else {
+                        [background[0], background[1], background[2]]
+                    };
+                    pixel = std::array::from_fn(|i| {
+                        (f32::from(surface[i]) * (1.0 - alpha) + f32::from(pixel[i]) * alpha)
+                            .round() as u8
+                    });
+                    coverage = (alpha * 255.0).round() as u8;
+                }
+                put(y, pixel, coverage);
             }
         }
     }

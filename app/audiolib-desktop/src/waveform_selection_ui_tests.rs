@@ -1104,6 +1104,43 @@ fn predicted_playhead_does_not_advance_past_selection_end() {
 }
 
 #[test]
+fn waveform_double_click_selects_the_entire_source_while_zoomed_or_reversed() {
+    i_slint_backend_testing::init_no_event_loop();
+    for modern in [false, true] {
+        let ui = window(modern);
+        ui.set_wave_source_duration(30.0);
+        ui.set_view_start(4.0);
+        ui.set_view_end(12.0);
+        let ranges = accept_ranges(&ui);
+        let whole_count = Rc::new(RefCell::new(0));
+        let observed = whole_count.clone();
+        ui.on_wave_selection_whole_requested(move || *observed.borrow_mut() += 1);
+        let seek_count = Rc::new(RefCell::new(0));
+        let observed = seek_count.clone();
+        ui.on_seek_play_requested(move |_| *observed.borrow_mut() += 1);
+        for reverse in [false, true] {
+            ui.set_wave_selection_active(false);
+            ui.set_confirmed_reverse(reverse);
+            *whole_count.borrow_mut() = 0;
+            *seek_count.borrow_mut() = 0;
+            i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(800));
+            for _ in 0..2 {
+                pressed(&ui, 0.5);
+                released(&ui, 0.5);
+                i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(40));
+            }
+            assert_eq!(*whole_count.borrow(), 1);
+            assert!(
+                ranges.borrow().is_empty(),
+                "a double click does not commit a partial range"
+            );
+            assert_eq!(*seek_count.borrow(), 1, "only the first click seeks");
+        }
+        ui.hide().unwrap();
+    }
+}
+
+#[test]
 fn reverse_waveform_maps_selection_seek_and_zoom_to_the_original() {
     i_slint_backend_testing::init_no_event_loop();
     for modern in [false, true] {

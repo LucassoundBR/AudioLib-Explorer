@@ -434,6 +434,8 @@ impl Controller {
             c.commit_wave_selection(f64::from(start), f64::from(end))
         });
         let c = self.clone();
+        ui.on_wave_selection_whole_requested(move || c.commit_wave_range(None));
+        let c = self.clone();
         ui.on_wave_selection_cleared(move || c.clear_wave_selection());
         let c = self.clone();
         ui.on_wave_selection_cancel_requested(move || c.cancel_slice_preparation());
@@ -759,6 +761,10 @@ impl Controller {
     }
 
     fn commit_wave_selection(self: &Arc<Self>, start: f64, end: f64) {
+        self.commit_wave_range(Some((start, end)));
+    }
+
+    fn commit_wave_range(self: &Arc<Self>, requested: Option<(f64, f64)>) {
         if !self.available() {
             return;
         }
@@ -772,6 +778,7 @@ impl Controller {
         let Some(source) = source else {
             return;
         };
+        let (start, end) = requested.unwrap_or((0.0, source.file.duration));
         let range = match AudioFrameRange::from_seconds(
             start.min(end),
             start.max(end),

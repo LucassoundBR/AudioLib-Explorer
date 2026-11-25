@@ -116,11 +116,15 @@ fn default_lucas_keeps_shared_peak_gain_and_adds_inline_transforms() {
         };
         let (pixels, _) = render_waveform_layers(&data, 1230, 120, view, false);
         if light_canvas {
-            assert_eq!(&pixels.as_bytes()[..4], &[181, 191, 195, 255]);
+            assert_eq!(&pixels.as_bytes()[..4], &[162, 173, 177, 255]);
         }
         ui.set_waveform_image(Image::from_rgba8(pixels));
     };
     present(true);
+    ui.set_wave_selection_identity("synthetic".into());
+    ui.set_wave_selection_start(12.0);
+    ui.set_wave_selection_end(41.0);
+    ui.set_wave_selection_active(true);
     ui.show().unwrap();
     frame(&ui, "default-lucas");
 

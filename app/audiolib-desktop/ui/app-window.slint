@@ -1924,6 +1924,7 @@ export component AppWindow inherits Window {
     changed background-blocked => { root.wave-pointer-feedback-changed(); }
     private property <bool> wave-selection-shift-held: false;
     callback wave-selection-committed(float,float);
+    callback wave-selection-whole-requested();
     callback wave-selection-cleared();
     callback wave-selection-drag-requested();
     callback wave-selection-drag-ended();
@@ -4093,6 +4094,7 @@ main-scroll := ScrollView {
             selection-pointer-feedback-changed => { root.wave-pointer-feedback-changed(); }
             selection-shift-held: root.wave-selection-shift-held;
             selection-committed(start, end) => { root.wave-selection-committed(start, end); }
+            select-whole => { root.wave-selection-whole-requested(); }
             selection-cleared => { root.wave-selection-cleared(); }
             selection-drag-requested => { root.wave-selection-drag-requested(); }
             selection-drag-ended => { root.wave-selection-drag-ended(); }
@@ -4995,6 +4997,7 @@ main-scroll := ScrollView {
             selection-pointer-feedback-changed => { root.wave-pointer-feedback-changed(); }
             selection-shift-held: root.wave-selection-shift-held;
             selection-committed(start, end) => { root.wave-selection-committed(start, end); }
+            select-whole => { root.wave-selection-whole-requested(); }
             selection-cleared => { root.wave-selection-cleared(); }
             selection-drag-requested => { root.wave-selection-drag-requested(); }
             selection-drag-ended => { root.wave-selection-drag-ended(); }

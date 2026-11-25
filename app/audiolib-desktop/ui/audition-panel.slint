@@ -1,5 +1,5 @@
 // app/audiolib-desktop/ui/audition-panel.slint
-import { ComboBox, Slider as NativeSlider } from "std-widgets.slint";
+import { ComboBox } from "std-widgets.slint";
 import { Theme, ThemedCheckBox, ThemedSlider as Slider } from "theme.slint";
 
 /// One time-ruler tick: its position as a fraction of the visible range and, on
@@ -1033,6 +1033,7 @@ component WaveSelectionOverlay inherits Rectangle {
     in property <bool> shift-held;
     in property <int> cancel-revision;
     callback committed(float,float);
+    callback select-whole();
     callback drag-requested();
     callback drag-ended();
     callback cancel-requested();
@@ -1108,8 +1109,10 @@ component WaveSelectionOverlay inherits Rectangle {
     property <float> span: max(0.000001, root.view-end - root.view-start);
     property <length> left-x: (root.shown-start - root.view-start) / root.span * root.width;
     property <length> right-x: (root.shown-end - root.view-start) / root.span * root.width;
-    property <bool> near-left: root.selection-active && root.selection-start >= root.view-start && root.selection-start <= root.view-end && abs(hit.mouse-x - root.left-x) <= 5px * Theme.ui-scale;
-    property <bool> near-right: root.selection-active && root.selection-end >= root.view-start && root.selection-end <= root.view-end && abs(hit.mouse-x - root.right-x) <= 5px * Theme.ui-scale;
+    property <length> handle-reach: (Theme.default-lucas ? 10px : 5px) * Theme.ui-scale;
+    property <length> handle-stroke: Theme.default-lucas ? 2px * Theme.ui-scale : 1px;
+    property <bool> near-left: root.selection-active && root.selection-start >= root.view-start && root.selection-start <= root.view-end && abs(hit.mouse-x - root.left-x) <= root.handle-reach;
+    property <bool> near-right: root.selection-active && root.selection-end >= root.view-start && root.selection-end <= root.view-end && abs(hit.mouse-x - root.right-x) <= root.handle-reach;
     property <bool> left-wins: root.near-left && (!root.near-right || abs(hit.mouse-x - root.left-x) <= abs(hit.mouse-x - root.right-x));
     property <bool> inside: root.selection-active && hit.mouse-x > root.left-x && hit.mouse-x < root.right-x;
     property <bool> grip-gesture: root.mode == 6 || root.mode == 7;
@@ -1176,22 +1179,32 @@ component WaveSelectionOverlay inherits Rectangle {
         accessible-role: text; accessible-label: root.chinese ? "选中的波形区域" : "Selected waveform region";
     }
     if root.shown-active && root.shown-start >= root.view-start && root.shown-start <= root.view-end: Rectangle {
-        x: clamp(round(root.left-x / 1px) * 1px, 0px, max(0px, root.width - 1px)); y: 0px; width: 1px; height: root.height;
+        x: clamp(round(root.left-x / 1px) * 1px, 0px, max(0px, root.width - self.width)); y: 0px; width: root.handle-stroke; height: root.height;
         background: root.pointer-kind == 4 ? Theme.accent-hover : Theme.ink.with-alpha(0.82);
-        Rectangle { x: 0px; y: 0px; width: 5px * Theme.ui-scale; height: 1px; background: parent.background; accessible-role: none; }
-        Rectangle { x: 0px; y: parent.height - 1px; width: 5px * Theme.ui-scale; height: 1px; background: parent.background; accessible-role: none; }
+        Rectangle { x: 0px; y: 0px; width: root.handle-reach; height: root.handle-stroke; background: parent.background; accessible-role: none; }
+        Rectangle { x: 0px; y: parent.height - self.height; width: root.handle-reach; height: root.handle-stroke; background: parent.background; accessible-role: none; }
     }
     if root.shown-active && root.shown-end >= root.view-start && root.shown-end <= root.view-end: Rectangle {
-        x: clamp(round(root.right-x / 1px) * 1px - 1px, 0px, max(0px, root.width - 1px)); y: 0px; width: 1px; height: root.height;
+        x: clamp(round(root.right-x / 1px) * 1px - self.width, 0px, max(0px, root.width - self.width)); y: 0px; width: root.handle-stroke; height: root.height;
         background: root.pointer-kind == 5 ? Theme.accent-hover : Theme.ink.with-alpha(0.82);
-        Rectangle { x: 1px - self.width; y: 0px; width: 5px * Theme.ui-scale; height: 1px; background: parent.background; accessible-role: none; }
-        Rectangle { x: 1px - self.width; y: parent.height - 1px; width: 5px * Theme.ui-scale; height: 1px; background: parent.background; accessible-role: none; }
+        Rectangle { x: parent.width - self.width; y: 0px; width: root.handle-reach; height: root.handle-stroke; background: parent.background; accessible-role: none; }
+        Rectangle { x: parent.width - self.width; y: parent.height - self.height; width: root.handle-reach; height: root.handle-stroke; background: parent.background; accessible-role: none; }
     }
     hit := TouchArea {
         x: 0px; y: 0px; width: parent.width; height: root.height;
         // Always track hover, including unavailable/seek-only plots. Every
         // mutation below separately checks the actual operation's availability.
         mouse-cursor: root.native-cursor ? crosshair : (root.pointer-kind > 0 && root.pointer-kind < 11 ? none : default);
+        double-clicked => {
+            // Slint delivers this before the final pointer-up. Retire the click
+            // gesture so that release cannot issue an extra seek.
+            if root.enabled && root.mode >= 1 && root.mode <= 4
+                && !root.travelled && abs(self.mouse-x - root.down-x) < 6px && abs(self.mouse-y - root.down-y) < 6px
+            {
+                root.cancel-gesture();
+                root.select-whole();
+            }
+        }
         pointer-event(event) => {
             if event.kind == PointerEventKind.cancel { root.cancel-gesture(); return; }
             if event.button != PointerEventButton.left { return; }
@@ -1340,6 +1353,7 @@ component ClassicAuditionPanel inherits Rectangle {
     in property <bool> selection-shift-held;
     in property <int> selection-cancel-revision;
     callback selection-committed(float,float);
+    callback select-whole();
     callback selection-cleared();
     callback selection-drag-requested();
     callback selection-drag-ended();
@@ -1571,7 +1585,7 @@ component ClassicAuditionPanel inherits Rectangle {
             ClassicTool { icon: @image-url("icons/peaks.svg"); label: root.chinese ? "波形显示设置" : "Peak display settings"; tip-align: 1; clicked => { root.peaks(); } }
         }
         wave-frame := Rectangle { horizontal-stretch: 1; vertical-stretch: 1; min-height: (root.compact ? 45px : 70px) * Theme.ui-scale;
-            wave := Rectangle { x: 0px; y: 0px; width: parent.width - (Theme.default-lucas ? gain-lane.width : 0px); height: parent.height; background: Theme.default-lucas ? #b5bfc3 : root.spectral && root.waveform-ready ? Theme.spectral-canvas : Theme.normal-canvas; border-color: Theme.player-border; border-width: 1px; clip: true;
+            wave := Rectangle { x: 0px; y: 0px; width: parent.width - (Theme.default-lucas ? gain-lane.width : 0px); height: parent.height; background: Theme.default-lucas ? #a2adb1 : root.spectral && root.waveform-ready ? Theme.spectral-canvas : Theme.normal-canvas; border-color: Theme.player-border; border-width: 1px; clip: true;
                 accessible-role: groupbox; accessible-label: root.chinese ? "波形时间轴" : "Waveform timeline";
                 property <float> played-fraction: root.duration > 0 ? clamp((root.visual-position - root.shown-start) / max(0.001, root.shown-end - root.shown-start), 0, 1) : 0;
                 changed width => { root.resize(self.width / 1px, self.height / 1px); }
@@ -1593,8 +1607,8 @@ component ClassicAuditionPanel inherits Rectangle {
                     tint: root.spectral ? #183c3428 : #8faea622;
                 }
                 if root.ready && root.duration > 0 && root.visual-position >= root.shown-start && root.visual-position <= root.shown-end: Rectangle {
-                    width: Theme.default-lucas ? 2px * Theme.ui-scale : 1px;
-                    x: wave.played-fraction * (parent.width - self.width);
+                    width: Theme.default-lucas ? 6px * Theme.ui-scale : 1px;
+                    x: clamp(wave.played-fraction * parent.width - self.width / 2, 0px, max(0px, parent.width - self.width));
                     background: Theme.default-lucas ? #233b38 : root.spectral ? #f4faf7 : Theme.accent-hover;
                 }
                 if scrub.hovered && !scrub.gesture && root.shown-end > root.shown-start && (root.ready || root.waveform-ready): WaveHoverGuide {
@@ -1640,6 +1654,7 @@ component ClassicAuditionPanel inherits Rectangle {
                         export-state: root.selection-export-state; native-cursor: root.selection-native-cursor;
                         shift-held: root.selection-shift-held; cancel-revision: root.selection-cancel-revision;
                         committed(start, end) => { root.selection-committed(start, end); }
+                        select-whole => { root.select-whole(); }
                         drag-requested => { root.selection-drag-requested(); }
                         drag-ended => { root.selection-drag-ended(); }
                         cancel-requested => { root.selection-cancel-requested(); }
@@ -1654,9 +1669,9 @@ component ClassicAuditionPanel inherits Rectangle {
                 x: wave.width; y: 0px; width: 48px * Theme.ui-scale; height: wave.height;
                 padding: 2px * Theme.ui-scale; spacing: 2px * Theme.ui-scale;
                 Caption { height: 14px * Theme.ui-scale; text: DisplayGain.label(root.display-gain); horizontal-alignment: center; font-size: Theme.font(9); }
-                NativeSlider {
+                Slider {
                     orientation: vertical; horizontal-stretch: 0; vertical-stretch: 1;
-                    accessible-label: root.chinese ? "波形显示增益" : "Waveform display gain";
+                    input-label: root.chinese ? "波形显示增益" : "Waveform display gain";
                     enabled: Theme.default-lucas;
                     minimum: -12; maximum: 36; step: 1;
                     value <=> root.display-gain;
@@ -1732,6 +1747,7 @@ component WorkbenchAuditionPanel inherits Rectangle {
     in property <bool> selection-shift-held;
     in property <int> selection-cancel-revision;
     callback selection-committed(float,float);
+    callback select-whole();
     callback selection-cleared();
     callback selection-drag-requested();
     callback selection-drag-ended();
@@ -2172,6 +2188,7 @@ component WorkbenchAuditionPanel inherits Rectangle {
                         export-state: root.selection-export-state; native-cursor: root.selection-native-cursor;
                         shift-held: root.selection-shift-held; cancel-revision: root.selection-cancel-revision;
                         committed(start, end) => { root.selection-committed(start, end); }
+                        select-whole => { root.select-whole(); }
                         drag-requested => { root.selection-drag-requested(); }
                         drag-ended => { root.selection-drag-ended(); }
                         cancel-requested => { root.selection-cancel-requested(); }
@@ -2302,6 +2319,7 @@ export component AuditionPanel inherits Rectangle {
     in property <string> selection-progress;
     in property <bool> selection-shift-held;
     callback selection-committed(float,float);
+    callback select-whole();
     callback selection-cleared();
     callback selection-drag-requested();
     callback selection-drag-ended();
@@ -2415,6 +2433,7 @@ export component AuditionPanel inherits Rectangle {
     height: Theme.modern-player ? 114px * (root.expanded ? Theme.max-audition-height-factor : 1) * Theme.ui-scale
         : (root.compact ? 176px : 204px) * Theme.ui-scale;
     if root.active && !Theme.modern-player: ClassicAuditionPanel {
+        select-whole => { root.select-whole(); }
         reverse: root.display-reverse; reverse-ready: root.reverse-ready;
         reverse-requested => { root.reverse-requested(); }
         reaper-supported: root.reaper-supported; reaper-ready: root.reaper-ready;
@@ -2502,6 +2521,7 @@ export component AuditionPanel inherits Rectangle {
         output-settings => { root.output-settings(); }
     }
     if root.active && Theme.modern-player: WorkbenchAuditionPanel {
+        select-whole => { root.select-whole(); }
         reverse: root.display-reverse; reverse-ready: root.reverse-ready;
         reverse-requested => { root.reverse-requested(); }
         width: parent.width; height: parent.height;
