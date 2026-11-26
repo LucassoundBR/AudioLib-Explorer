@@ -2,7 +2,7 @@
 //! Source-bound Waveform ranges, ordered audition and durable native drag exports.
 use super::status_feedback::AudioActivity;
 use super::*;
-use audiolib_audio::AudioFade;
+use audiolib_audio::{AudioChannelEdit, AudioEdits, AudioFade};
 use audiolib_core::AudioFrameRange;
 #[cfg(test)]
 #[path = "waveform_selection_tests.rs"]
@@ -198,6 +198,12 @@ struct Selection {
     preview_cancel: Arc<AtomicBool>,
     reverse: bool,
     fade: AudioFade,
+    channels: AudioChannelEdit,
+}
+
+enum WaveEdit {
+    Fade(f32, f32),
+    Channels(i32),
 }
 
 impl Selection {
@@ -272,12 +278,15 @@ impl SliceOriginal {
                 return save().map_err(|e| e.to_string());
             }
         };
-        audiolib_audio::export_edited_audio(
+        audiolib_audio::export_audio_with_edits(
             path,
             destination,
             Some(selection.range),
-            selection.reverse,
-            selection.fade,
+            AudioEdits {
+                reverse: selection.reverse,
+                fade: selection.fade,
+                channels: selection.channels,
+            },
             &selection.render_cancel,
             progress,
         )
@@ -386,6 +395,7 @@ impl Controller {
     }
     pub(super) fn bind_wave_selection(self: &Arc<Self>, ui: &AppWindow) {
         ui.set_reaper_supported(cfg!(windows));
+        ui.set_source_channel_edit_supported(true);
         let c = self.clone();
         ui.on_reaper_send_requested(move || c.send_to_reaper());
         let c = self.clone();
@@ -438,6 +448,8 @@ impl Controller {
         ui.on_wave_selection_whole_requested(move || c.commit_wave_range(None));
         let c = self.clone();
         ui.on_wave_fade_committed(move |leading, trailing| c.commit_wave_fade(leading, trailing));
+        let c = self.clone();
+        ui.on_wave_channels_changed(move |mode| c.commit_wave_edit(WaveEdit::Channels(mode)));
         let c = self.clone();
         ui.on_wave_selection_cleared(move || c.clear_wave_selection());
         let c = self.clone();
@@ -553,19 +565,26 @@ impl Controller {
                         &roots,
                     )
                     .map_err(|error| error.to_string())?;
-                    let fade = if playback.playback_range.is_none()
+                    let current = if playback.playback_range.is_none()
                         && playback
                             .file_path
                             .as_deref()
                             .is_some_and(|loaded| same_path(loaded, &path))
                     {
-                        playback.audition.fade
+                        playback.audition
                     } else {
-                        AudioFade::default()
+                        AuditionSettings::default()
                     };
-                    if reverse || !fade.is_empty() {
-                        let published =
-                            c.prepare_edited_whole_file(&source, &path, reverse, fade)?;
+                    let edits = AudioEdits {
+                        reverse,
+                        fade: current.fade,
+                        channels: current.channel_edit,
+                    };
+                    if reverse
+                        || !edits.fade.is_empty()
+                        || edits.channels != AudioChannelEdit::Original
+                    {
+                        let published = c.prepare_edited_whole_file(&source, &path, edits)?;
                         destination.send(&published.path, &c.closing)
                     } else {
                         destination.send(&path, &c.closing)
@@ -594,8 +613,7 @@ impl Controller {
         &self,
         source: &WaveSource,
         path: &Path,
-        reverse: bool,
-        fade: AudioFade,
+        edits: AudioEdits,
     ) -> Result<PublishedSlice, String> {
         let export_directory = self.slice_directory().map_err(|error| error.to_string())?;
         std::fs::create_dir_all(&export_directory).map_err(|error| error.to_string())?;
@@ -605,12 +623,11 @@ impl Controller {
         let staging = crate::slice_staging::prepare_staging(&export_directory)
             .map_err(|error| error.to_string())?;
         let rendered = staging.directory.path().join("edited.wav");
-        audiolib_audio::export_edited_audio(
+        audiolib_audio::export_audio_with_edits(
             path,
             &rendered,
             None,
-            reverse,
-            fade,
+            edits,
             &self.closing,
             &mut |_, _| {},
         )
@@ -622,9 +639,10 @@ impl Controller {
         ) {
             return Err("The original audio is no longer available".into());
         }
-        let suffix = match (reverse, fade.is_empty()) {
-            (true, true) => "reverse",
-            (true, false) => "reverse-faded",
+        let suffix = match (edits.reverse, edits.fade.is_empty(), edits.channels) {
+            (_, _, AudioChannelEdit::Single(_) | AudioChannelEdit::MonoPair(_)) => "mono",
+            (true, true, _) => "reverse",
+            (true, false, _) => "reverse-faded",
             _ => "faded",
         };
         let stem = format!("{}-{suffix}", slice_stem(&source.file.filename));
@@ -724,7 +742,7 @@ impl Controller {
             return;
         }
         ui.set_confirmed_reverse(reverse);
-        self.refresh_slice_transform(ui, reverse, None);
+        self.refresh_slice_transform(ui, reverse, None, None);
     }
 
     fn refresh_slice_transform(
@@ -732,6 +750,7 @@ impl Controller {
         ui: &AppWindow,
         reverse: bool,
         fade: Option<AudioFade>,
+        channels: Option<AudioChannelEdit>,
     ) {
         let selection = {
             let mut state = self.slice.lock().unwrap();
@@ -739,12 +758,18 @@ impl Controller {
                 return;
             };
             let fade = fade.unwrap_or(selection.fade);
-            if (selection.reverse == reverse && selection.fade == fade) || selection.source.remote {
+            let channels = channels.unwrap_or(selection.channels);
+            if (selection.reverse == reverse
+                && selection.fade == fade
+                && selection.channels == channels)
+                || selection.source.remote
+            {
                 return;
             }
             selection.render_cancel.store(true, Ordering::Release);
             selection.reverse = reverse;
             selection.fade = fade;
+            selection.channels = channels;
             selection.render_cancel = Arc::new(AtomicBool::new(false));
             state.ready = None;
             state.published = None;
@@ -757,13 +782,15 @@ impl Controller {
     }
 
     fn commit_wave_fade(self: &Arc<Self>, leading: f32, trailing: f32) {
+        self.commit_wave_edit(WaveEdit::Fade(leading, trailing));
+    }
+
+    fn commit_wave_edit(self: &Arc<Self>, edit: WaveEdit) {
         let Some(ui) = self.ui.upgrade() else { return };
         if !self.available()
             || ui.get_wave_fade_pending()
             || ui.get_reverse_pending()
             || self.drag_busy.load(Ordering::Acquire)
-            || !leading.is_finite()
-            || !trailing.is_finite()
         {
             return;
         }
@@ -790,24 +817,54 @@ impl Controller {
             return;
         }
         let rate = f64::from(status.sample_rate);
-        let frames = range.map_or_else(
-            || source.total_frames(),
-            |range| range.end_frame - range.start_frame,
-        );
-        let fade = AudioFade {
-            fade_in: (f64::from(leading) * rate).round() as u64,
-            fade_out: (f64::from(trailing) * rate).round() as u64,
-        }
-        .bounded(frames);
-        if status.audition.fade == fade {
-            return;
-        }
         let generation = status.generation;
-        let completion = match self.audio.enqueue_with_ack(AudioCommand::SetFade {
-            expected_generation: generation,
-            range,
-            fade,
-        }) {
+        let command = match edit {
+            WaveEdit::Fade(leading, trailing) if leading.is_finite() && trailing.is_finite() => {
+                let frames = range.map_or_else(
+                    || source.total_frames(),
+                    |range| range.end_frame - range.start_frame,
+                );
+                let fade = AudioFade {
+                    fade_in: (f64::from(leading) * rate).round() as u64,
+                    fade_out: (f64::from(trailing) * rate).round() as u64,
+                }
+                .bounded(frames);
+                if status.audition.fade == fade {
+                    return;
+                }
+                AudioCommand::SetFade {
+                    expected_generation: generation,
+                    range,
+                    fade,
+                }
+            }
+            WaveEdit::Channels(mode)
+                if status.channels > 1 && !self.wave_selection_gesture.load(Ordering::Acquire) =>
+            {
+                let edit = match mode {
+                    -2 => AudioChannelEdit::Original,
+                    -1 => AudioChannelEdit::MonoPair(if status.channels == 2 {
+                        0
+                    } else {
+                        self.playback
+                            .lock()
+                            .unwrap()
+                            .source_pair
+                            .min((status.channels - 1) / 2)
+                    }),
+                    value if (0..i32::from(status.channels)).contains(&value) => {
+                        AudioChannelEdit::Single(value as u16)
+                    }
+                    _ => return,
+                };
+                AudioCommand::SetChannelEdit {
+                    expected_generation: generation,
+                    edit,
+                }
+            }
+            _ => return,
+        };
+        let completion = match self.audio.enqueue_with_ack(command) {
             Ok(completion) => completion,
             Err(error) => {
                 ui.set_status(error.to_string().into());
@@ -837,9 +894,15 @@ impl Controller {
                     ui.set_status(error.to_string().into());
                     return;
                 }
-                ui.set_wave_fade_in((fade.fade_in as f64 / rate) as f32);
-                ui.set_wave_fade_out((fade.fade_out as f64 / rate) as f32);
-                controller.refresh_slice_transform(&ui, status.audition.reverse, Some(fade));
+                let audition = status.audition;
+                ui.set_wave_fade_in((audition.fade.fade_in as f64 / rate) as f32);
+                ui.set_wave_fade_out((audition.fade.fade_out as f64 / rate) as f32);
+                controller.refresh_slice_transform(
+                    &ui,
+                    audition.reverse,
+                    Some(audition.fade),
+                    Some(audition.channel_edit),
+                );
             });
         });
     }
@@ -943,9 +1006,19 @@ impl Controller {
         .store(true, Ordering::Release);
         let selection = {
             let mut state = self.slice.lock().unwrap();
+            let status = self.audio.status();
+            let channels = if !source.remote
+                && status
+                    .file_path
+                    .as_deref()
+                    .is_some_and(|path| same_path(path, Path::new(&source.file.file_path)))
+            {
+                status.audition.channel_edit
+            } else {
+                AudioChannelEdit::Original
+            };
             let mut fade = AudioFade::default();
             if let Some(old) = state.selection.take() {
-                let status = self.audio.status();
                 if old.range == range
                     && old.source.key == source.key
                     && status.playback_range == Some(range)
@@ -962,6 +1035,7 @@ impl Controller {
             let selection = Selection {
                 reverse: ui.get_confirmed_reverse() && !source.remote,
                 fade,
+                channels,
                 source,
                 range,
                 revision: state.revision,

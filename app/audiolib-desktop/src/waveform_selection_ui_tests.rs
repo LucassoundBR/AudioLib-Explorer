@@ -196,6 +196,43 @@ fn monitor_mode_cycles_only_through_available_routes_in_both_players() {
 }
 
 #[test]
+fn source_channel_menu_offers_only_routes_present_in_the_loaded_file() {
+    i_slint_backend_testing::init_no_event_loop();
+    for modern in [false, true] {
+        let ui = window(modern);
+        ui.set_source_channel_edit_supported(true);
+        let routes = Rc::new(RefCell::new(Vec::new()));
+        let observed = routes.clone();
+        ui.on_wave_channels_changed(move |route| observed.borrow_mut().push(route));
+        let mode = || {
+            ElementHandle::find_by_accessible_label(&ui, "Source channels")
+                .next()
+                .unwrap()
+        };
+        let item = |label: &str| ElementHandle::find_by_accessible_label(&ui, label).next();
+        ui.set_monitor_source_channels(2);
+        settle();
+        mode().mock_single_click(PointerEventButton::Left);
+        assert!(item("Stereo").is_some());
+        assert!(item("Mono").is_some());
+        assert!(item("L").is_some());
+        assert!(item("CH 3").is_none());
+        item("R").unwrap().invoke_accessible_default_action();
+        assert_eq!(routes.borrow().as_slice(), &[1]);
+        ui.set_monitor_source_channels(6);
+        settle();
+        mode().mock_single_click(PointerEventButton::Left);
+        assert!(item("CH 7").is_none());
+        item("CH 6").unwrap().invoke_accessible_default_action();
+        assert_eq!(routes.borrow().as_slice(), &[1, 5]);
+        ui.set_monitor_source_channels(1);
+        settle();
+        assert_eq!(mode().accessible_enabled(), Some(false));
+        ui.hide().unwrap();
+    }
+}
+
+#[test]
 fn compact_studio_ruler_leaves_space_between_visible_timestamps() {
     i_slint_backend_testing::init_no_event_loop();
     let ui = window(true);

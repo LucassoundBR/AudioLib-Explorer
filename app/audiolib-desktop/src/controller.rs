@@ -9266,6 +9266,11 @@ pub(crate) fn rejected_audition_fields(pitch: &str, rate: &str) -> i32 {
 }
 
 fn publish_audition(ui: &AppWindow, settings: AuditionSettings) {
+    ui.set_source_channel_edit(match settings.channel_edit {
+        audiolib_audio::AudioChannelEdit::Original => -2,
+        audiolib_audio::AudioChannelEdit::MonoPair(_) => -1,
+        audiolib_audio::AudioChannelEdit::Single(channel) => i32::from(channel),
+    });
     ui.set_pitch_text(format!("{:.2}", settings.pitch_semitones).into());
     ui.set_speed_text(format!("{:.2}", settings.rate).into());
     ui.set_audition_mono(settings.mono);

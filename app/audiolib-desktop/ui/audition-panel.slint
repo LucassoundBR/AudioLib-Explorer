@@ -1,5 +1,5 @@
 // app/audiolib-desktop/ui/audition-panel.slint
-import { ComboBox } from "std-widgets.slint";
+import { ComboBox, ScrollView } from "std-widgets.slint";
 import { Theme, ThemedCheckBox, ThemedSlider as Slider } from "theme.slint";
 
 /// One time-ruler tick: its position as a fraction of the visible range and, on
@@ -961,23 +961,35 @@ component MonitorModeButton inherits ClassicTool {
     in property <int> output-channels;
     in property <bool> mono;
     in property <bool> stereo-pair;
+    in property <bool> channel-picker;
+    in property <int> channel-edit: -2;
     callback select-mode(bool, bool);
+    callback edit-channel(int);
     property <bool> multi-available: root.source-channels > 2 && root.output-channels > 2;
     property <bool> stereo-only: root.source-channels == 2 && root.output-channels > 2;
     property <bool> mono-source: root.source-channels == 1;
-    property <bool> is-mono: root.mono-source || (!root.stereo-only && (root.mono || root.output-channels == 1));
+    property <bool> is-mono: root.channel-edit == -1 || root.mono-source || (!root.stereo-only && (root.mono || root.output-channels == 1));
     property <bool> is-multi: root.multi-available && !root.is-mono && !root.stereo-pair;
-    property <string> mode-name: root.is-mono ? "MONO" : root.is-multi ? "MULTI" : "STEREO";
+    property <string> mode-name: root.channel-edit >= 0 ? root.channel-label(root.channel-edit)
+        : root.is-mono ? "MONO" : root.is-multi ? "MULTI" : "STEREO";
+    pure function channel-label(channel: int) -> string {
+        return root.source-channels == 2 ? (channel == 0 ? "L" : "R") : "CH " + (channel + 1);
+    }
     property <string> next-mode: root.is-multi ? "STEREO" : !root.is-mono ? "MONO" : root.multi-available ? "MULTI" : "STEREO";
-    checkable: !root.multi-available;
-    active: root.is-mono || root.is-multi;
-    enabled: !root.mono-source && root.output-channels != 1 && !root.stereo-only;
-    label: root.multi-available || root.stereo-only ? (root.chinese ? "监听模式" : "Monitor mode") : (root.chinese ? "单声道监听" : "Mono monitoring");
+    checkable: !root.channel-picker && !root.multi-available;
+    active: root.is-mono || root.is-multi || root.channel-edit >= 0;
+    enabled: !root.mono-source && (root.channel-picker || (root.output-channels != 1 && !root.stereo-only));
+    label: root.channel-picker ? (root.chinese ? "源声道" : "Source channels")
+        : root.multi-available || root.stereo-only ? (root.chinese ? "监听模式" : "Monitor mode") : (root.chinese ? "单声道监听" : "Mono monitoring");
     hint: root.mono-source ? (root.chinese ? "单声道素材" : "Mono source")
+        : root.channel-picker ? (root.chinese ? "选择试听与导出的声道" : "Choose channels for audition and export")
         : root.stereo-only ? (root.chinese ? "双声道素材 · 立体声监听" : "Stereo source · Stereo monitoring")
         : !root.enabled ? (root.chinese ? "设备只有一个输出声道" : "Device has one output channel")
         : root.mode-name + (root.chinese ? " · 点击切换到 " : " · Switch to ") + root.next-mode;
-    clicked => { root.select-mode(root.next-mode == "MONO", root.next-mode == "STEREO"); }
+    clicked => {
+        if root.channel-picker { choose-channel.show(); }
+        else { root.select-mode(root.next-mode == "MONO", root.next-mode == "STEREO"); }
+    }
     width: 20px * Theme.ui-scale + Theme.font(11) * 4.5;
     HorizontalLayout {
         alignment: center; spacing: 3px * Theme.ui-scale;
@@ -991,6 +1003,38 @@ component MonitorModeButton inherits ClassicTool {
             font-size: Theme.font(11); font-weight: 700; letter-spacing: 0.55px * Theme.ui-scale;
             color: Theme.text(4, root.active ? 6 : 0, root.active ? Theme.accent-hover : Theme.ink);
             vertical-alignment: center; accessible-role: none;
+        }
+    }
+    choose-channel := PopupWindow {
+        close-policy: close-on-click-outside;
+        x: 0px; y: -self.height - 4px * Theme.ui-scale;
+        width: 102px * Theme.ui-scale;
+        height: min(220px * Theme.ui-scale, (root.source-channels + 2) * 27px * Theme.ui-scale + 8px * Theme.ui-scale);
+        Rectangle {
+            background: Theme.panel; border-color: Theme.strong-border; border-width: 1phx; border-radius: 5px;
+            ScrollView {
+                width: parent.width; height: parent.height;
+                viewport-height: (root.source-channels + 2) * 27px * Theme.ui-scale + 8px * Theme.ui-scale;
+                VerticalLayout {
+                    width: parent.width; padding: 4px * Theme.ui-scale; spacing: 1px * Theme.ui-scale;
+                    ClassicTool {
+                        height: 26px * Theme.ui-scale;
+                        symbol: root.source-channels == 2 ? "Stereo" : (root.chinese ? "原始声道" : "Original");
+                        label: self.symbol; active: root.channel-edit == -2;
+                        clicked => { root.edit-channel(-2); choose-channel.close(); }
+                    }
+                    ClassicTool {
+                        height: 26px * Theme.ui-scale;
+                        symbol: "Mono"; label: self.symbol; active: root.channel-edit == -1;
+                        clicked => { root.edit-channel(-1); choose-channel.close(); }
+                    }
+                    for channel in root.source-channels: ClassicTool {
+                        height: 26px * Theme.ui-scale;
+                        symbol: root.channel-label(channel); label: self.symbol; active: root.channel-edit == channel;
+                        clicked => { root.edit-channel(channel); choose-channel.close(); }
+                    }
+                }
+            }
         }
     }
 }
@@ -1495,6 +1539,9 @@ component ClassicAuditionPanel inherits Rectangle {
     in-out property <bool> mono: false;
     in-out property <bool> stereo-pair;
     in property <int> monitor-source-channels;
+    in property <bool> source-channel-picker;
+    in property <int> source-channel-edit: -2;
+    callback wave-channels-changed(int);
     in property <int> monitor-output-channels;
     in-out property <bool> repeat: false;
     callback play(); callback pause(); callback stop(); callback seek(float); callback seek-play(float);
@@ -1656,6 +1703,8 @@ component ClassicAuditionPanel inherits Rectangle {
                 chinese: root.chinese; mono: root.mono; stereo-pair: root.stereo-pair;
                 source-channels: root.monitor-source-channels; output-channels: root.monitor-output-channels;
                 select-mode(mono, pair) => { root.mono = mono; root.stereo-pair = pair; root.transform(root.pitch-text, root.rate-text, mono, root.repeat); }
+                channel-picker: root.source-channel-picker; channel-edit: root.source-channel-edit;
+                edit-channel(mode) => { root.wave-channels-changed(mode); }
             }
             if root.reaper-supported: ReaperTools {
                 y: (parent.height - self.height) / 2;
@@ -1906,6 +1955,9 @@ component WorkbenchAuditionPanel inherits Rectangle {
     in-out property <bool> mono: false;
     in-out property <bool> stereo-pair;
     in property <int> monitor-source-channels;
+    in property <bool> source-channel-picker;
+    in property <int> source-channel-edit: -2;
+    callback wave-channels-changed(int);
     in property <int> monitor-output-channels;
     in-out property <bool> repeat: false;
     callback play(); callback pause(); callback stop(); callback seek(float); callback seek-play(float);
@@ -2126,6 +2178,8 @@ component WorkbenchAuditionPanel inherits Rectangle {
                     chinese: root.chinese; mono: root.mono; stereo-pair: root.stereo-pair;
                     source-channels: root.monitor-source-channels; output-channels: root.monitor-output-channels;
                     select-mode(mono, pair) => { root.mono = mono; root.stereo-pair = pair; root.transform(root.pitch-text, root.rate-text, mono, root.repeat); }
+                    channel-picker: root.source-channel-picker; channel-edit: root.source-channel-edit;
+                    edit-channel(mode) => { root.wave-channels-changed(mode); }
                 }
                 Rectangle { width: 1px; height: 14px * Theme.ui-scale; y: (parent.height - self.height) / 2; background: Theme.border; }
                 Tool { width: 22px * Theme.ui-scale; height: 24px * Theme.ui-scale; subtle: true; symbol: "−"; symbol-size: Theme.font(14); label: root.chinese ? "缩小波形" : "Zoom out"; enabled: root.waveform-progress >= 1 && root.ready && root.zoom > 1; clicked => { root.zoom-change(0.5); } }
@@ -2500,6 +2554,9 @@ export component AuditionPanel inherits Rectangle {
     in-out property <bool> mono: false;
     in-out property <bool> stereo-pair;
     in property <int> monitor-source-channels;
+    in property <bool> source-channel-picker;
+    in property <int> source-channel-edit: -2;
+    callback wave-channels-changed(int);
     in property <int> monitor-output-channels;
     in-out property <bool> repeat: false;
     callback play(); callback pause(); callback stop(); callback seek(float); callback seek-play(float);
@@ -2602,6 +2659,8 @@ export component AuditionPanel inherits Rectangle {
         rate-text <=> root.rate-text;
         mono <=> root.mono; stereo-pair <=> root.stereo-pair;
         monitor-source-channels: root.monitor-source-channels; monitor-output-channels: root.monitor-output-channels;
+        source-channel-picker: root.source-channel-picker; source-channel-edit: root.source-channel-edit;
+        wave-channels-changed(mode) => { root.wave-channels-changed(mode); }
         repeat <=> root.repeat;
         volume-focus-changed(adjusting) => { root.presenter-volume-adjusting = adjusting; }
         play => { root.play(); }
@@ -2697,6 +2756,8 @@ export component AuditionPanel inherits Rectangle {
         rate-text <=> root.rate-text;
         mono <=> root.mono; stereo-pair <=> root.stereo-pair;
         monitor-source-channels: root.monitor-source-channels; monitor-output-channels: root.monitor-output-channels;
+        source-channel-picker: root.source-channel-picker; source-channel-edit: root.source-channel-edit;
+        wave-channels-changed(mode) => { root.wave-channels-changed(mode); }
         repeat <=> root.repeat;
         volume-focus-changed(adjusting) => { root.presenter-volume-adjusting = adjusting; }
         premute-db <=> root.premute-db;

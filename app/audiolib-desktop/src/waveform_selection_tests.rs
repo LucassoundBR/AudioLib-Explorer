@@ -211,6 +211,7 @@ fn selection(
         preview_cancel: Arc::new(AtomicBool::new(false)),
         reverse: false,
         fade: AudioFade::default(),
+        channels: AudioChannelEdit::Original,
     }
 }
 

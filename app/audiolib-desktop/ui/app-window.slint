@@ -1876,6 +1876,9 @@ export component AppWindow inherits Window {
     in-out property <bool> audition-mono: false;
     in-out property <bool> audition-stereo-pair;
     in property <int> monitor-source-channels;
+    in property <bool> source-channel-edit-supported;
+    in property <int> source-channel-edit: -2;
+    callback wave-channels-changed(int);
     in property <int> monitor-output-channels;
     in-out property <bool> audition-repeat: false;
     in-out property <bool> audition-play-on-single-click: false;
@@ -4134,6 +4137,9 @@ main-scroll := ScrollView {
             scroll <=> root.wave-scroll; volume-db <=> root.volume-db; volume-label: root.volume-label;
             pitch-text <=> root.pitch-text; rate-text <=> root.speed-text; mono <=> root.audition-mono; stereo-pair <=> root.audition-stereo-pair;
             monitor-source-channels: root.monitor-source-channels; monitor-output-channels: root.monitor-output-channels; repeat <=> root.audition-repeat;
+            source-channel-picker: root.source-channel-edit-supported && root.audio-ready && !root.remote-mode;
+            source-channel-edit: root.source-channel-edit;
+            wave-channels-changed(mode) => { root.wave-channels-changed(mode); }
             play => { root.start-requested(); } pause => { root.pause-requested(); } stop => { root.stop-requested(); }
             seek(value) => { root.seek-requested(value); }
             seek-play(value) => { root.seek-play-requested(value); }
@@ -5042,6 +5048,9 @@ main-scroll := ScrollView {
             scroll <=> root.wave-scroll; volume-db <=> root.volume-db; volume-label: root.volume-label;
             pitch-text <=> root.pitch-text; rate-text <=> root.speed-text; mono <=> root.audition-mono; stereo-pair <=> root.audition-stereo-pair;
             monitor-source-channels: root.monitor-source-channels; monitor-output-channels: root.monitor-output-channels; repeat <=> root.audition-repeat;
+            source-channel-picker: root.source-channel-edit-supported && root.audio-ready && !root.remote-mode;
+            source-channel-edit: root.source-channel-edit;
+            wave-channels-changed(mode) => { root.wave-channels-changed(mode); }
             play => { root.start-requested(); } pause => { root.pause-requested(); } stop => { root.stop-requested(); }
             seek(value) => { root.seek-requested(value); }
             seek-play(value) => { root.seek-play-requested(value); }
