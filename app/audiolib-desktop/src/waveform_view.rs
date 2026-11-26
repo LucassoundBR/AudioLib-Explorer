@@ -241,6 +241,71 @@ fn ruler_label(seconds: f64, decimals: usize, hours: bool) -> String {
 
 type WavePixels = slint::SharedPixelBuffer<slint::Rgba8Pixel>;
 
+/// Project the peak at a column center. Quiet single-sample views still need
+/// a thin trace when the lower and upper bounds meet.
+fn envelope_point(
+    peak: &audiolib_audio::WaveformPeak,
+    center: f32,
+    amplitude: f32,
+    gain: f32,
+) -> [f32; 2] {
+    if peak.max.abs().max(peak.min.abs()) * gain < 0.00001 {
+        return [center; 2];
+    }
+    let upper = center - (peak.max * gain).clamp(-1.0, 1.0) * amplitude;
+    let lower = center - (peak.min * gain).clamp(-1.0, 1.0) * amplitude;
+    let middle = (upper + lower) * 0.5;
+    [upper.min(middle - 0.35), lower.max(middle + 0.35)]
+}
+
+/// The coverage of one pixel below a line segment spanning a half-column.
+/// The line sweeps from `a` to `b` without snapping either end to a row.
+fn coverage_below(a: f32, b: f32, row_end: f32) -> f32 {
+    let near = row_end - a.max(b);
+    let far = row_end - a.min(b);
+    if far <= 0.0 || near >= 1.0 || (near >= 0.0 && far <= 1.0) {
+        return ((near + far) * 0.5).clamp(0.0, 1.0);
+    }
+    let start = near.max(0.0);
+    let end = far.min(1.0);
+    ((end - start) * (start + end) * 0.5 + (far - 1.0).max(0.0)) / (far - near)
+}
+
+/// Connect adjacent peak centers. Each column covers the second half of the
+/// incoming segment and the first half of the outgoing one.
+struct EnvelopeStrip {
+    upper: [f32; 3],
+    lower: [f32; 3],
+}
+
+impl EnvelopeStrip {
+    fn new(previous: [f32; 2], center: [f32; 2], next: [f32; 2]) -> Self {
+        let edge = |side| {
+            [
+                (previous[side] + center[side]) * 0.5,
+                center[side],
+                (center[side] + next[side]) * 0.5,
+            ]
+        };
+        Self {
+            upper: edge(0),
+            lower: edge(1),
+        }
+    }
+
+    fn coverage(&self, row: u32) -> f32 {
+        let row_end = row as f32 + 0.5;
+        let [a, b, c] = self.upper;
+        let [d, e, f] = self.lower;
+        if a.max(b).max(c) <= row_end - 1.0 && d.min(e).min(f) >= row_end {
+            return 1.0;
+        }
+        let upper = coverage_below(a, b, row_end) + coverage_below(b, c, row_end);
+        let lower = coverage_below(d, e, row_end) + coverage_below(e, f, row_end);
+        ((upper - lower) * 0.5).clamp(0.0, 1.0)
+    }
+}
+
 /// Rasterize the spectral/normal image and optional Studio coverage in one pass.
 pub(crate) fn render_waveform_layers(
     data: &WaveformData,
@@ -281,10 +346,16 @@ pub(crate) fn render_waveform_layers(
         let center = lane * (channel as f32 + 0.5);
         let amplitude = (lane * 0.44).max(1.0);
         let top = (channel as f32 * lane) as u32;
-        let bottom = (((channel + 1) as f32 * lane) as u32)
-            .saturating_sub(1)
-            .min(height - 1);
-        let center_row = center.min((height - 1) as f32) as u32;
+        let end = (((channel + 1) as f32 * lane) as u32).min(height);
+        if top >= end || peaks.is_empty() {
+            continue;
+        }
+        let bottom = end - 1;
+        let center_row = (center as u32).clamp(top, bottom);
+        let peak_at = |x| &peaks[x as usize * peaks.len() / width as usize];
+        let point_at = |x| envelope_point(peak_at(x), center, amplitude, gain);
+        let mut previous = view.light_canvas.then(|| point_at(0));
+        let mut current = previous;
         for x in 0..width {
             let mut put = |y: u32, color: [u8; 3], coverage: u8| {
                 let index = (y * width + x) as usize;
@@ -294,10 +365,21 @@ pub(crate) fn render_waveform_layers(
                 }
             };
             put(center_row, center_color, 45);
-            let Some(peak) = peaks.get(x as usize * peaks.len() / width as usize) else {
-                continue;
+            let peak = peak_at(x);
+            let strip = if let (Some(before), Some(at)) = (previous, current) {
+                let next = point_at((x + 1).min(width - 1));
+                (previous, current) = (Some(at), Some(next));
+                Some(EnvelopeStrip::new(before, at, next))
+            } else {
+                if peak.max.abs().max(peak.min.abs()) * gain < 0.00001 {
+                    continue;
+                }
+                None
             };
-            if peak.max.abs().max(peak.min.abs()) * gain < 0.00001 {
+            if strip
+                .as_ref()
+                .is_some_and(|strip| strip.upper == strip.lower)
+            {
                 continue;
             }
             let high = (center - (peak.max * gain).clamp(-1.0, 1.0) * amplitude)
@@ -325,27 +407,36 @@ pub(crate) fn render_waveform_layers(
             };
             let core_color = color.map(|v| (v as f32 * 0.78) as u8);
             let rms_height = peak.rms * gain * amplitude;
-            let first = if view.light_canvas {
-                upper.round()
-            } else {
-                upper
-            } as u32;
-            let last = if view.light_canvas {
-                lower.round()
-            } else {
-                lower
-            } as u32;
+            let first = strip.as_ref().map_or(upper as u32, |strip| {
+                (strip
+                    .upper
+                    .into_iter()
+                    .fold(f32::INFINITY, f32::min)
+                    .round() as u32)
+                    .clamp(top, bottom)
+            });
+            let last = strip.as_ref().map_or(lower as u32, |strip| {
+                (strip
+                    .lower
+                    .into_iter()
+                    .fold(f32::NEG_INFINITY, f32::max)
+                    .round() as u32)
+                    .clamp(top, bottom)
+            });
             for y in first..=last {
                 // Slightly darker RMS core leaves transients readable without
                 // manufacturing a spectrogram or changing amplitude geometry.
                 let core = (y as f32 - center).abs() < rms_height;
-                let mut pixel = if core { core_color } else { color };
-                let mut coverage = 255;
-                if view.light_canvas && (y == first || y == last) {
-                    // Blend only the boundary pixels using the fraction covered
-                    // by the envelope. Keep the measured min/max and RMS intact.
-                    let row = y as f32;
-                    let alpha = (lower.min(row + 0.5) - upper.max(row - 0.5)).clamp(0.0, 1.0);
+                let mut pixel = if core && strip.is_none() {
+                    core_color
+                } else {
+                    color
+                };
+                let alpha = strip.as_ref().map_or(1.0, |strip| strip.coverage(y));
+                if alpha == 0.0 {
+                    continue;
+                }
+                if alpha < 1.0 {
                     let surface = if y == center_row {
                         center_color
                     } else {
@@ -355,9 +446,8 @@ pub(crate) fn render_waveform_layers(
                         (f32::from(surface[i]) * (1.0 - alpha) + f32::from(pixel[i]) * alpha)
                             .round() as u8
                     });
-                    coverage = (alpha * 255.0).round() as u8;
                 }
-                put(y, pixel, coverage);
+                put(y, pixel, (alpha * 255.0).round().max(1.0) as u8);
             }
         }
     }
@@ -667,6 +757,40 @@ mod tests {
         );
         assert_eq!(&normal[0..4], &NORMAL_BACKGROUND);
         assert_eq!(&normal[10 * 4..11 * 4], &[143, 174, 166, 255]);
+    }
+
+    #[test]
+    fn continuous_silhouette_connects_transient_to_both_sides_in_its_lane() {
+        let transient = audiolib_audio::WaveformPeak {
+            min: -0.8,
+            max: 0.8,
+            ..Default::default()
+        };
+        let data = WaveformData {
+            frames: 30,
+            sample_rate: 1000,
+            samples_per_pixel: 10,
+            channels: 2,
+            peaks: vec![
+                vec![Default::default(), transient, Default::default()],
+                vec![Default::default(); 3],
+            ],
+        };
+        let mask = render_waveform_mask(
+            &data,
+            3,
+            80,
+            WaveView {
+                light_canvas: true,
+                ..Default::default()
+            },
+        );
+        let alpha = |x: usize, y: usize| mask[(y * 3 + x) * 4 + 3];
+        assert!(alpha(0, 17) > 0 && alpha(0, 17) < 255);
+        assert_eq!(alpha(0, 17), alpha(2, 17));
+        assert_eq!(alpha(1, 17), 255);
+        assert!((40..80).filter(|&y| y != 60).all(|y| alpha(1, y) == 0));
+        assert_eq!(alpha(1, 60), 45);
     }
 
     #[test]
