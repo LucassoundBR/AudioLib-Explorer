@@ -26,7 +26,6 @@ export struct AudioRow {
     tags: string,
     tag-preview: [string],
     tag-extra: int,
-    duration-clock: string,
     album: string,
     favorite: bool,
     played: bool,
@@ -3798,8 +3797,8 @@ main-scroll := ScrollView {
                                     HorizontalLayout { alignment: start; padding-left: root.table-state-size + root.table-wave-size + root.table-name-size + root.table-duration-size + 12px * Theme.ui-scale; padding-right: 12px * Theme.ui-scale; spacing: 24px * Theme.ui-scale;
                                         table-format-cell := Text { width: root.table-format-size - 24px * Theme.ui-scale; text: row.format; color: Theme.text(2, 1, Theme.dim); vertical-alignment: center; font-size: Theme.list-font(10); overflow: elide; }
                                         table-channels-cell := Text { width: root.table-channels-size - 24px * Theme.ui-scale; text: row.channels; color: Theme.text(2, 1, Theme.dim); vertical-alignment: center; font-size: Theme.list-font(11); overflow: elide; }
-                                        table-tags-cell := Text { width: root.table-tags-size - 24px * Theme.ui-scale; text: row.tags; color: Theme.text(2, 1, Theme.dim); vertical-alignment: center; overflow: elide; font-size: Theme.list-font(10); }
-                                        table-album-cell := Text { width: root.table-album-size - 24px * Theme.ui-scale; text: row.album; color: Theme.text(2, 1, Theme.dim); vertical-alignment: center; overflow: elide; font-size: Theme.list-font(10); }
+                                        table-tags-cell := Text { width: root.table-tags-size - 24px * Theme.ui-scale; text: row.tags; color: Theme.text(2, 1, Theme.dim); vertical-alignment: center; overflow: elide; font-size: Theme.list-font-size; }
+                                        table-album-cell := Text { width: root.table-album-size - 24px * Theme.ui-scale; text: row.album; color: Theme.text(2, 1, Theme.dim); vertical-alignment: center; overflow: elide; font-size: Theme.list-font-size; }
                                     }
                                     result-hit := TouchArea { x: root.table-state-size; width: parent.width - root.table-state-size; mouse-cursor: pointer;
                                         property <bool> toggle-selection;
@@ -4684,19 +4683,19 @@ main-scroll := ScrollView {
                                         if row.wave-state == 1: Image { y: 5px * Theme.ui-scale; width: parent.width; height: parent.height - 10px * Theme.ui-scale; source: row.wave; colorize: root.selected-row == index ? Theme.accent : Theme.dim; image-fit: fill; image-rendering: pixelated; }
                                         if row.wave-state == 4: Rectangle { y: 5px * Theme.ui-scale; height: parent.height - 10px * Theme.ui-scale; width: parent.width; background: Theme.warning.with-alpha(0.1); Image { width: parent.width; height: parent.height; source: row.wave; colorize: Theme.warning; image-fit: fill; opacity: 0.45; } }
                                     }
-                                    studio-table-duration-cell := Text { x: root.table-duration-x + 12px * Theme.ui-scale; width: root.table-duration-size - 24px * Theme.ui-scale; height: root.studio-result-row-height; text: row.duration-clock; color: root.selected-row == index ? Theme.text(2, 5, Theme.accent) : Theme.text(2, 0, Theme.ink); vertical-alignment: center; font-family: Theme.font-family == "" ? "Consolas" : Theme.font-family; font-size: Theme.list-font(11); overflow: elide; }
+                                    studio-table-duration-cell := Text { x: root.table-duration-x + 12px * Theme.ui-scale; width: root.table-duration-size - 24px * Theme.ui-scale; height: root.studio-result-row-height; text: row.duration; color: root.selected-row == index ? Theme.text(2, 5, Theme.accent) : Theme.text(2, 0, Theme.ink); vertical-alignment: center; font-family: Theme.font-family == "" ? "Consolas" : Theme.font-family; font-size: Theme.list-font(11); overflow: elide; }
                                     HorizontalLayout { alignment: start; padding-left: root.table-state-size + root.table-wave-size + root.table-name-size + root.table-duration-size + 12px * Theme.ui-scale; padding-right: 12px * Theme.ui-scale; spacing: 24px * Theme.ui-scale;
                                         studio-table-format-cell := Text { width: root.table-format-size - 24px * Theme.ui-scale; height: root.studio-result-row-height; text: row.format; color: root.selected-row == index ? Theme.text(2, 5, Theme.accent) : Theme.text(2, 1, Theme.dim); vertical-alignment: center; font-size: Theme.list-font(11); overflow: elide; }
                                         studio-table-channels-cell := Text { width: root.table-channels-size - 24px * Theme.ui-scale; height: root.studio-result-row-height; text: row.channels; color: root.selected-row == index ? Theme.text(2, 5, Theme.accent) : Theme.text(2, 1, Theme.dim); vertical-alignment: center; font-size: Theme.list-font(11); overflow: elide; }
                                         studio-table-tags-cell := Rectangle { width: root.table-tags-size - 24px * Theme.ui-scale; height: root.studio-result-row-height; clip: true;
                                             HorizontalLayout { padding-top: 5px * Theme.ui-scale; padding-bottom: 5px * Theme.ui-scale; spacing: 4px * Theme.ui-scale; alignment: start;
-                                                for tag in row.tag-preview: DisplayTag { text-module: 2; text-state: root.selected-row == index ? 5 : 1; height: parent.height; text: tag; ink: root.selected-row == index ? Theme.accent : Theme.ink; text-size: Theme.list-font(10); max-width: max(20px * Theme.ui-scale, (parent.width - 8px * Theme.ui-scale - (row.tag-extra > 0 ? 28px * Theme.ui-scale : 0px)) / max(1, row.tag-preview.length)); }
-                                                if row.tag-extra > 0: Label { text-module: 2; text: "+" + row.tag-extra; color: root.selected-row == index ? Theme.text(2, 5, Theme.accent) : Theme.text(2, 1, Theme.dim); font-size: Theme.list-font(10); }
-                                                if row.tag-preview.length == 0 && row.tags != "": DisplayTag { text-module: 2; text-state: root.selected-row == index ? 5 : 1; height: parent.height; text: row.tags; ink: root.selected-row == index ? Theme.accent : Theme.ink; text-size: Theme.list-font(10); max-width: parent.width; }
+                                                for tag in row.tag-preview: DisplayTag { text-module: 2; text-state: root.selected-row == index ? 5 : 1; height: parent.height; text: tag; ink: root.selected-row == index ? Theme.accent : Theme.ink; text-size: Theme.list-font-size; max-width: max(20px * Theme.ui-scale, (parent.width - 8px * Theme.ui-scale - (row.tag-extra > 0 ? 28px * Theme.ui-scale : 0px)) / max(1, row.tag-preview.length)); }
+                                                if row.tag-extra > 0: Label { text-module: 2; text: "+" + row.tag-extra; color: root.selected-row == index ? Theme.text(2, 5, Theme.accent) : Theme.text(2, 1, Theme.dim); font-size: Theme.list-font-size; }
+                                                if row.tag-preview.length == 0 && row.tags != "": DisplayTag { text-module: 2; text-state: root.selected-row == index ? 5 : 1; height: parent.height; text: row.tags; ink: root.selected-row == index ? Theme.accent : Theme.ink; text-size: Theme.list-font-size; max-width: parent.width; }
                                             }
                                             Tooltip { text: @markdown("\{row.tags}"); }
                                         }
-                                        studio-table-album-cell := Text { width: root.table-album-size - 24px * Theme.ui-scale; height: root.studio-result-row-height; text: row.album; color: root.selected-row == index ? Theme.text(2, 5, Theme.accent) : Theme.text(2, 1, Theme.dim); vertical-alignment: center; overflow: elide; font-size: Theme.list-font(11); }
+                                        studio-table-album-cell := Text { width: root.table-album-size - 24px * Theme.ui-scale; height: root.studio-result-row-height; text: row.album; color: root.selected-row == index ? Theme.text(2, 5, Theme.accent) : Theme.text(2, 1, Theme.dim); vertical-alignment: center; overflow: elide; font-size: Theme.list-font-size; }
                                     }
                                     Tooltip { text: @markdown("\{row.name}\n\{row.file-path}"); }
 

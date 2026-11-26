@@ -8999,6 +8999,7 @@ impl ListWaveformHost for Controller {
 }
 
 fn audio_row(file: &AudioFile) -> AudioRow {
+    let seconds = file.duration as u64;
     let tag_labels = crate::detail_presentation::labels(file);
     let tag_extra = tag_labels.len().saturating_sub(3).min(i32::MAX as usize) as i32;
     let marker = file
@@ -9014,8 +9015,7 @@ fn audio_row(file: &AudioFile) -> AudioRow {
             .parent()
             .map_or(String::new(), |path| path.to_string_lossy().into_owned())
             .into(),
-        duration: format!("{:.2}s", file.duration).into(),
-        duration_clock: format_time(file.duration).into(),
+        duration: format!("{:02}m{:02}s", seconds / 60, seconds % 60).into(),
         format: if file.bit_depth == 0 {
             format!("{:.1}k / —", file.sample_rate as f64 / 1000.0)
         } else {

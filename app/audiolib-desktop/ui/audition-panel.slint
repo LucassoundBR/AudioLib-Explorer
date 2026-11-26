@@ -925,8 +925,9 @@ component ReaperTools inherits HorizontalLayout {
     in property <bool> blocked;
     in-out property <bool> auto-focus;
     callback send();
+    padding-left: 8px * Theme.ui-scale;
     height: 30px * Theme.ui-scale;
-    spacing: 5px * Theme.ui-scale;
+    spacing: 12px * Theme.ui-scale;
     ClassicTool {
         icon: @image-url("icons/export.svg");
         label: root.chinese ? "发送到 REAPER" : "Send to REAPER";
@@ -934,12 +935,22 @@ component ReaperTools inherits HorizontalLayout {
         enabled: root.ready && !root.busy && !root.blocked;
         clicked => { root.send(); }
     }
-    ThemedCheckBox {
-        text: "Auto-Focus"; text-module: 4; surface: Theme.player;
+    focus-box := Rectangle {
+        property <string> explanation: root.chinese ? "发送后将 REAPER 切换到前台" : "Bring REAPER to the foreground after sending";
+        property <bool> tip-ready;
         width: Theme.font(12) * 7.8 + 24px * Theme.ui-scale;
         height: root.height;
-        description: root.chinese ? "发送后切换到 REAPER" : "Bring REAPER to the foreground after sending";
-        checked <=> root.auto-focus; enabled: !root.blocked && !root.busy;
+        hover := TouchArea {
+            changed has-hover => { if !self.has-hover { focus-box.tip-ready = false; } }
+            ThemedCheckBox {
+                width: parent.width; height: parent.height;
+                text: "Auto-Focus"; text-module: 4; surface: Theme.player;
+                description: focus-box.explanation;
+                checked <=> root.auto-focus; enabled: !root.blocked && !root.busy;
+            }
+        }
+        Timer { interval: Theme.tooltip-delay; running: hover.has-hover && !focus-box.tip-ready; triggered => { focus-box.tip-ready = true; } }
+        Tip { z: 10; anchor-width: parent.width; anchor-height: parent.height; text: parent.explanation; show: parent.tip-ready && hover.has-hover; }
     }
 }
 
@@ -953,15 +964,17 @@ component MonitorModeButton inherits ClassicTool {
     callback select-mode(bool, bool);
     property <bool> multi-available: root.source-channels > 2 && root.output-channels > 2;
     property <bool> stereo-only: root.source-channels == 2 && root.output-channels > 2;
-    property <bool> is-mono: !root.stereo-only && (root.mono || root.output-channels == 1 || (root.source-channels == 1 && !root.stereo-pair));
+    property <bool> mono-source: root.source-channels == 1;
+    property <bool> is-mono: root.mono-source || (!root.stereo-only && (root.mono || root.output-channels == 1));
     property <bool> is-multi: root.multi-available && !root.is-mono && !root.stereo-pair;
     property <string> mode-name: root.is-mono ? "MONO" : root.is-multi ? "MULTI" : "STEREO";
     property <string> next-mode: root.is-multi ? "STEREO" : !root.is-mono ? "MONO" : root.multi-available ? "MULTI" : "STEREO";
     checkable: !root.multi-available;
     active: root.is-mono || root.is-multi;
-    enabled: root.output-channels != 1 && !root.stereo-only;
+    enabled: !root.mono-source && root.output-channels != 1 && !root.stereo-only;
     label: root.multi-available || root.stereo-only ? (root.chinese ? "监听模式" : "Monitor mode") : (root.chinese ? "单声道监听" : "Mono monitoring");
-    hint: root.stereo-only ? (root.chinese ? "双声道素材 · 立体声监听" : "Stereo source · Stereo monitoring")
+    hint: root.mono-source ? (root.chinese ? "单声道素材" : "Mono source")
+        : root.stereo-only ? (root.chinese ? "双声道素材 · 立体声监听" : "Stereo source · Stereo monitoring")
         : !root.enabled ? (root.chinese ? "设备只有一个输出声道" : "Device has one output channel")
         : root.mode-name + (root.chinese ? " · 点击切换到 " : " · Switch to ") + root.next-mode;
     clicked => { root.select-mode(root.next-mode == "MONO", root.next-mode == "STEREO"); }
@@ -1229,29 +1242,31 @@ component WaveSelectionOverlay inherits Rectangle {
             x: root.fade-left-x; y: 0px;
             width: root.shown-leading / root.span * root.width; height: root.height;
             viewbox-width: 100; viewbox-height: 100;
-            stroke: Theme.accent-hover; stroke-width: 1px;
-            MoveTo { x: 0; y: 100; }
+            fit: fill; stroke-width: 0px; fill: #00000055;
+            MoveTo { x: 0; y: 0; }
             LineTo { x: 100; y: 0; }
+            LineTo { x: 0; y: 100; }
+            Close { }
         }
         if root.shown-trailing > 0: Path {
             x: root.fade-right-x - self.width; y: 0px;
             width: root.shown-trailing / root.span * root.width; height: root.height;
             viewbox-width: 100; viewbox-height: 100;
-            stroke: Theme.accent-hover; stroke-width: 1px;
+            fit: fill; stroke-width: 0px; fill: #00000055;
             MoveTo { x: 0; y: 0; }
+            LineTo { x: 100; y: 0; }
             LineTo { x: 100; y: 100; }
+            Close { }
         }
         if root.left-fade-visible: Rectangle {
             x: root.fade-left-x; y: 0px; width: root.fade-reach; height: root.fade-height;
-            background: root.pointer-kind == 12 ? Theme.accent-hover : Theme.accent;
-            border-radius: 2px;
             accessible-role: text; accessible-label: root.chinese ? "淡入" : "Fade In";
+            Rectangle { x: 1px; y: 1px; width: parent.width * 0.62; height: parent.height * 0.62; border-radius: 2px; background: root.pointer-kind == 12 ? Theme.accent-hover : Theme.accent; }
         }
         if root.right-fade-visible: Rectangle {
             x: root.fade-right-x - root.fade-reach; y: 0px; width: root.fade-reach; height: root.fade-height;
-            background: root.pointer-kind == 13 ? Theme.accent-hover : Theme.accent;
-            border-radius: 2px;
             accessible-role: text; accessible-label: root.chinese ? "淡出" : "Fade Out";
+            Rectangle { x: parent.width - self.width - 1px; y: 1px; width: parent.width * 0.62; height: parent.height * 0.62; border-radius: 2px; background: root.pointer-kind == 13 ? Theme.accent-hover : Theme.accent; }
         }
     }
     hit := TouchArea {
@@ -1680,9 +1695,9 @@ component ClassicAuditionPanel inherits Rectangle {
                     tint: root.spectral ? #183c3428 : #8faea622;
                 }
                 if root.ready && root.duration > 0 && root.visual-position >= root.shown-start && root.visual-position <= root.shown-end: Rectangle {
-                    width: Theme.default-lucas ? 6px * Theme.ui-scale : 1px;
+                    width: Theme.default-lucas ? 2px * Theme.ui-scale : 1px;
                     x: clamp(wave.played-fraction * parent.width - self.width / 2, 0px, max(0px, parent.width - self.width));
-                    background: Theme.default-lucas ? #233b38 : root.spectral ? #f4faf7 : Theme.accent-hover;
+                    background: Theme.default-lucas ? #ffffff : root.spectral ? #f4faf7 : Theme.accent-hover;
                 }
                 if scrub.hovered && !scrub.gesture && root.shown-end > root.shown-start && (root.ready || root.waveform-ready): WaveHoverGuide {
                     width: parent.width; height: parent.height; pointer-x: scrub.pointer-x;

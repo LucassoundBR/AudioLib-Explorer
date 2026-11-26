@@ -77,8 +77,7 @@ fn compact_results_keep_filename_and_duration_inside_both_workbenches() {
         ui.window().set_size(slint::LogicalSize::new(1080.0, 700.0));
         ui.set_rows(ModelRc::new(VecModel::from(vec![AudioRow {
             name: "Distant pass.wav".into(),
-            duration: "12.34s".into(),
-            duration_clock: "00:12.340".into(),
+            duration: "00m12s".into(),
             ..Default::default()
         }])));
         ui.show().unwrap();

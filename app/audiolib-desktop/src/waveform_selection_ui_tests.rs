@@ -169,12 +169,10 @@ fn monitor_mode_cycles_only_through_available_routes_in_both_players() {
             )
             .next()
             .unwrap();
-            let cycle = if output == 1 || stereo_only {
+            let cycle = if source == 1 || output == 1 || stereo_only {
                 Vec::new()
             } else if multi {
                 vec!["MULTI", "STEREO", "MONO", "MULTI"]
-            } else if source == 1 {
-                vec!["MONO", "STEREO", "MONO"]
             } else {
                 vec!["STEREO", "MONO", "STEREO"]
             };
@@ -183,8 +181,14 @@ fn monitor_mode_cycles_only_through_available_routes_in_both_players() {
                 button.invoke_accessible_default_action();
                 settle();
             }
-            if output == 1 || stereo_only {
+            if source == 1 || output == 1 || stereo_only {
                 assert_eq!(button.accessible_enabled(), Some(false));
+            }
+            if source == 1 {
+                assert_eq!(
+                    button.accessible_description().as_deref(),
+                    Some("Mono source")
+                );
             }
         }
         ui.hide().unwrap();
