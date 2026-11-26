@@ -221,6 +221,9 @@ pub struct AudioDevice {
 pub enum AudioCommand {
     Load(PathBuf),
     Play,
+    /// Audition after Pause starts from the latest explicit cue or the clip start.
+    #[serde(skip)]
+    PlayFromCue,
     Pause,
     Stop,
     Seek(f64),
@@ -1363,6 +1366,7 @@ struct Worker {
     status: Arc<Mutex<PlaybackStatus>>,
     output: Option<Output>,
     output_idle_since: Option<std::time::Instant>,
+    cue_position: Option<f64>,
     needs_recovery: bool,
     session_open: AtomicBool,
     subscribers: Subscribers,
@@ -1388,6 +1392,7 @@ impl Worker {
             status,
             output: None,
             output_idle_since: None,
+            cue_position: None,
             needs_recovery: false,
             session_open: AtomicBool::new(session_open),
             subscribers,
@@ -1913,6 +1918,7 @@ impl Worker {
                 let generation = self.snapshot().generation.wrapping_add(1);
                 self.suspend_output()?;
                 self.needs_recovery = false;
+                self.cue_position = None;
                 let previous = self.snapshot();
                 self.config.audition.fade = crate::AudioFade::default();
                 if previous.file_path.as_ref() != Some(&path) {
@@ -1993,6 +1999,20 @@ impl Worker {
                         ..Default::default()
                     }
                 });
+            }
+            AudioCommand::PlayFromCue => {
+                let status = self.snapshot();
+                if status.state == PlaybackState::Paused {
+                    let (start, end) = playback_bounds(&status);
+                    let cue = self
+                        .cue_position
+                        .filter(|position| {
+                            (start..=end).contains(position) && !at_playback_end(&status, *position)
+                        })
+                        .unwrap_or_else(|| playback_start(&status));
+                    self.command(AudioCommand::Seek(cue))?;
+                }
+                self.command(AudioCommand::Play)?;
             }
             AudioCommand::Play => {
                 let before = self.snapshot();
@@ -2080,6 +2100,7 @@ impl Worker {
                         status.playback_range,
                     )?;
                 }
+                self.cue_position = None;
                 self.update_transport(|status| {
                     status.position = start;
                     status.error = None;
@@ -2108,7 +2129,11 @@ impl Worker {
                     )?;
                 } else if playing {
                     self.start_output_at(Some(position))?;
+                    self.cue_position = Some(position);
                     return Ok(());
+                }
+                if status.file_path.is_some() {
+                    self.cue_position = Some(position);
                 }
                 self.update_transport(|current| {
                     current.position = position;
@@ -2157,6 +2182,7 @@ impl Worker {
                         Some(range),
                     )?;
                 }
+                self.cue_position = None;
                 self.config.audition = audition;
                 self.update_transport(|status| {
                     status.audition = audition;
@@ -2193,6 +2219,7 @@ impl Worker {
                         None,
                     )?;
                 }
+                self.cue_position = None;
                 self.config.audition = audition;
                 self.update_transport(|status| {
                     status.audition = audition;
@@ -2760,6 +2787,64 @@ mod tests {
             Arc::new(Mutex::new(status)),
             Arc::new(Mutex::new(Vec::new())),
         )
+    }
+
+    #[test]
+    fn play_from_cue_retriggers_after_pause_with_or_without_a_reversed_range() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("cue.wav");
+        for reverse in [false, true] {
+            for selected in [false, true] {
+                let output = prepared_output(&path);
+                let mut worker = worker(PlaybackStatus::default());
+                worker.command(AudioCommand::Load(path.clone())).unwrap();
+                worker.output = Some(output);
+                if reverse {
+                    worker.command(AudioCommand::ToggleReverse).unwrap();
+                }
+                if selected {
+                    let range = AudioFrameRange {
+                        start_frame: 200,
+                        end_frame: 800,
+                        sample_rate: 1000,
+                    };
+                    worker
+                        .command(AudioCommand::PlayRange {
+                            range,
+                            expected_generation: worker.snapshot().generation,
+                        })
+                        .unwrap();
+                } else {
+                    worker.command(AudioCommand::Play).unwrap();
+                }
+                let left_edge = playback_start(&worker.snapshot());
+                let session = worker.snapshot().play_session_id;
+
+                for explicit_cue in [None, Some(0.45)] {
+                    if let Some(cue) = explicit_cue {
+                        worker.command(AudioCommand::SeekAndPlay(cue)).unwrap();
+                    }
+                    worker
+                        .output
+                        .as_ref()
+                        .unwrap()
+                        .realtime
+                        .consumed
+                        .store(75, Ordering::Relaxed);
+                    worker.command(AudioCommand::Pause).unwrap();
+                    let expected = explicit_cue.unwrap_or(left_edge);
+                    let paused = worker.snapshot();
+                    assert_eq!(paused.state, PlaybackState::Paused);
+                    assert!((paused.position - expected).abs() > 0.05);
+
+                    worker.command(AudioCommand::PlayFromCue).unwrap();
+                    let played = worker.snapshot();
+                    assert_eq!(played.state, PlaybackState::Playing);
+                    assert!((played.position - expected).abs() < 1e-8);
+                    assert_eq!(played.play_session_id, session);
+                }
+            }
+        }
     }
     // No CPAL stream is constructed: these fixtures exercise the actual ring,
     // source decoder and control transitions without accessing audio hardware.

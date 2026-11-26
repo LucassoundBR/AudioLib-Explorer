@@ -1921,7 +1921,7 @@ impl Controller {
                 return;
             }
             let command = if play {
-                AudioCommand::Play
+                AudioCommand::PlayFromCue
             } else {
                 AudioCommand::Pause
             };
@@ -1957,7 +1957,7 @@ impl Controller {
             }
             match c.audio_reload_target() {
                 Some(id) => c.select_id(id, true),
-                None => c.command(AudioCommand::Play),
+                None => c.command(AudioCommand::PlayFromCue),
             }
         });
         let c = self.clone();
@@ -7596,7 +7596,10 @@ impl Controller {
     fn command(&self, command: AudioCommand) {
         if matches!(
             command,
-            AudioCommand::Play | AudioCommand::SeekAndPlay(_) | AudioCommand::Seek(_)
+            AudioCommand::Play
+                | AudioCommand::PlayFromCue
+                | AudioCommand::SeekAndPlay(_)
+                | AudioCommand::Seek(_)
         ) {
             self.list_waveforms.note_audition_start();
         }

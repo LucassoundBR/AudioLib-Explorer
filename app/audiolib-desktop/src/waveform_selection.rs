@@ -1139,7 +1139,7 @@ impl Controller {
         };
         let status = self.audio.status();
         if status.playback_range == Some(selection.range) {
-            self.command(AudioCommand::Play);
+            self.command(AudioCommand::PlayFromCue);
         } else {
             self.commit_wave_selection(
                 selection.range.start_seconds(),
