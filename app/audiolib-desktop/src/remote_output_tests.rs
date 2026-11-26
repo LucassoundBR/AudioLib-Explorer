@@ -164,7 +164,7 @@ fn child_remote_source_pair() {
             stereo_pair: false,
             loop_enabled: true,
             reverse: false,
-            fade: Default::default(),
+            ..Default::default()
         };
         engine
             .handle()

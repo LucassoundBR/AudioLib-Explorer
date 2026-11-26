@@ -1,7 +1,7 @@
 // crates/audiolib-audio/src/slice.rs
 //! Bounded, source-frame WAV export from real local originals, independent of audition.
 use crate::{
-    AudioFade,
+    AudioChannelEdit, AudioFade,
     decoder::Decoder,
     pcm_layout::{ByteOrder, SampleKind},
     wav::{WavInfo, read_info_reader},
@@ -295,6 +295,38 @@ pub fn export_edited_audio(
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(u64, u64),
 ) -> Result<()> {
+    export_audio_with_edits(
+        source,
+        destination,
+        range,
+        AudioEdits {
+            reverse,
+            fade,
+            ..AudioEdits::default()
+        },
+        cancel,
+        progress,
+    )
+}
+
+/// Non-destructive edits that affect a rendered source-frame range.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AudioEdits {
+    pub reverse: bool,
+    pub fade: AudioFade,
+    pub channels: AudioChannelEdit,
+}
+
+/// Render a slice or whole source with an explicit channel choice.
+/// Retains the source's sample rate and precision.
+pub fn export_audio_with_edits(
+    source: &Path,
+    destination: &Path,
+    range: Option<AudioFrameRange>,
+    edits: AudioEdits,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(u64, u64),
+) -> Result<()> {
     cancelled(cancel)?;
     let source = std::fs::canonicalize(source)?;
     let mut file = open_original(&source)?;
@@ -316,16 +348,10 @@ pub fn export_edited_audio(
             "Slice range is outside the original source frames".into(),
         ));
     }
-    if (reverse || !fade.is_empty()) && info.pcm_layout.is_none() {
-        reverse_export::export_via_pcm(
-            &source,
-            destination,
-            range,
-            reverse,
-            fade,
-            cancel,
-            progress,
-        )?;
+    let channels = edits.channels.indices(info.metadata.channels)?;
+    if (edits.reverse || !edits.fade.is_empty() || channels.is_some()) && info.pcm_layout.is_none()
+    {
+        reverse_export::export_via_pcm(&source, destination, range, edits, cancel, progress)?;
         // Only acquire cleanup ownership after create-new export succeeded.
         let mut partial = PartialOutput {
             path: destination,
@@ -340,7 +366,11 @@ pub fn export_edited_audio(
         partial.committed = true;
         return Ok(());
     }
-    let format = OutputFormat::for_source(&info)?;
+    let mut format = OutputFormat::for_source(&info)?;
+    if channels.is_some() {
+        format.channels = 1;
+        format.mask = 0;
+    }
     let frames = range.end_frame - range.start_frame;
     let header = format.header(frames)?;
     cancelled(cancel)?;
@@ -364,8 +394,9 @@ pub fn export_edited_audio(
             format,
             PcmRange {
                 range,
-                reverse,
-                fade: fade.bounded(frames),
+                reverse: edits.reverse,
+                fade: edits.fade.bounded(frames),
+                channels,
             },
             cancel,
             progress,
@@ -410,6 +441,7 @@ struct PcmRange {
     range: AudioFrameRange,
     reverse: bool,
     fade: AudioFade,
+    channels: Option<(usize, Option<usize>)>,
 }
 
 fn copy_pcm(
@@ -425,12 +457,13 @@ fn copy_pcm(
         range,
         reverse,
         fade,
+        channels,
     } = plan;
     let layout = info.pcm_layout.expect("PCM export was selected");
     let align = usize::from(info.block_align);
     let width = usize::from(layout.bytes_per_sample);
-    let output_align = usize::from(format.align());
-    if align < output_align {
+    let source_align = usize::from(info.metadata.channels) * width;
+    if align < source_align {
         return Err(invalid("Invalid original PCM frame alignment"));
     }
     let start = range
@@ -462,7 +495,7 @@ fn copy_pcm(
                 elapsed
             };
             let frame = &mut bytes[index * align..(index + 1) * align];
-            let samples = &mut frame[..output_align];
+            let samples = &mut frame[..source_align];
             if matches!(layout.endian, ByteOrder::Big) {
                 for sample in samples.chunks_exact_mut(width) {
                     sample.reverse();
@@ -473,15 +506,32 @@ fn copy_pcm(
                     *sample ^= 0x80;
                 }
             }
-            if !fade.is_empty() {
+            if let Some((first, second)) = channels {
                 let (num, den) = fade.gain(frames, done + elapsed as u64);
-                if num != den {
-                    for sample in samples.chunks_exact_mut(width) {
-                        scale_pcm_sample(format, sample, num, den);
+                let (first, second) = if let Some(second) = second {
+                    let (leading, trailing) = samples.split_at_mut(second * width);
+                    (
+                        &mut leading[first * width..(first + 1) * width],
+                        Some(&trailing[..width]),
+                    )
+                } else {
+                    (&mut samples[first * width..(first + 1) * width], None)
+                };
+                if num != den || second.is_some() {
+                    scale_pcm_sample(format, first, second, num, den);
+                }
+                output.write_all(first)?;
+            } else {
+                if !fade.is_empty() {
+                    let (num, den) = fade.gain(frames, done + elapsed as u64);
+                    if num != den {
+                        for sample in samples.chunks_exact_mut(width) {
+                            scale_pcm_sample(format, sample, None, num, den);
+                        }
                     }
                 }
+                output.write_all(samples)?;
             }
-            output.write_all(samples)?;
         }
         done += count as u64;
         progress(done, frames);
@@ -489,33 +539,45 @@ fn copy_pcm(
     Ok(())
 }
 
-fn scale_pcm_sample(format: OutputFormat, sample: &mut [u8], num: u64, den: u64) {
+fn scale_pcm_sample(
+    format: OutputFormat,
+    sample: &mut [u8],
+    second: Option<&[u8]>,
+    num: u64,
+    den: u64,
+) {
     if format.float {
         let gain = num as f64 / den as f64;
+        let load = |bytes: &[u8]| match bytes.len() {
+            4 => f64::from(f32::from_le_bytes(bytes.try_into().unwrap())),
+            8 => f64::from_le_bytes(bytes.try_into().unwrap()),
+            _ => unreachable!("validated float layout"),
+        };
+        let first = load(sample);
+        let value = second.map_or(first, |bytes| first * 0.5 + load(bytes) * 0.5) * gain;
         match sample.len() {
-            4 => sample.copy_from_slice(
-                &((f64::from(f32::from_le_bytes((&*sample).try_into().unwrap())) * gain) as f32)
-                    .to_le_bytes(),
-            ),
-            8 => sample.copy_from_slice(
-                &(f64::from_le_bytes((&*sample).try_into().unwrap()) * gain).to_le_bytes(),
-            ),
+            4 => sample.copy_from_slice(&(value as f32).to_le_bytes()),
+            8 => sample.copy_from_slice(&value.to_le_bytes()),
             _ => unreachable!("validated float layout"),
         }
         return;
     }
     let width = sample.len();
     let padding = u32::from(format.bytes * 8 - format.valid_bits);
-    let centered = if width == 1 {
-        i32::from(sample[0]) - 128
-    } else {
-        let mut word = [0; 4];
-        word[..width].copy_from_slice(sample);
-        let shift = 32 - width * 8;
-        (i32::from_le_bytes(word) << shift) >> shift
+    let integer = |bytes: &[u8]| {
+        let centered = if width == 1 {
+            i32::from(bytes[0]) - 128
+        } else {
+            let mut word = [0; 4];
+            word[..width].copy_from_slice(bytes);
+            let shift = 32 - width * 8;
+            (i32::from_le_bytes(word) << shift) >> shift
+        };
+        i128::from(centered >> padding)
     };
-    let product = i128::from(centered >> padding) * i128::from(num);
-    let divisor = i128::from(den);
+    let sum = integer(sample) + second.map_or(0, integer);
+    let product = sum * i128::from(num);
+    let divisor = i128::from(den) * if second.is_some() { 2 } else { 1 };
     let value = ((product + product.signum() * (divisor / 2)) / divisor) as i32;
     let stored = value << padding;
     if width == 1 {

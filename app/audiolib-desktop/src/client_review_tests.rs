@@ -437,7 +437,7 @@ fn child_queued_playback_error() {
         stereo_pair: false,
         loop_enabled: true,
         reverse: false,
-        fade: Default::default(),
+        ..Default::default()
     };
     let transformed = controller
         .audio

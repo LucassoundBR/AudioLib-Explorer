@@ -13,6 +13,97 @@ fn collect(mut decoder: AuditionDecoder) -> Vec<f32> {
 }
 
 #[test]
+fn chosen_channels_match_the_reversed_faded_mono_wav() {
+    use crate::{AudioChannelEdit, AudioEdits, AudioFade};
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("stereo.wav");
+    let pcm: Vec<u8> = (0..12)
+        .flat_map(|i| [1200_i16 + i * 4, -400_i16 - i * 4])
+        .flat_map(i16::to_le_bytes)
+        .collect();
+    crate::tests::write_wav(&source, 48000, 2, 16, 1, &pcm, false, false);
+    let range = AudioFrameRange {
+        start_frame: 2,
+        end_frame: 9,
+        sample_rate: 48000,
+    };
+    let fade = AudioFade {
+        fade_in: 2,
+        fade_out: 3,
+    };
+    for (index, (channels, center)) in [
+        (AudioChannelEdit::Single(0), 1220_i16),
+        (AudioChannelEdit::Single(1), -420_i16),
+        (AudioChannelEdit::MonoPair(0), 400_i16),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let target = temp.path().join(format!("picked-{index}.wav"));
+        crate::export_audio_with_edits(
+            &source,
+            &target,
+            Some(range),
+            AudioEdits {
+                reverse: true,
+                fade,
+                channels,
+            },
+            &AtomicBool::new(false),
+            &mut |_, _| {},
+        )
+        .unwrap();
+        let metadata = crate::probe(&target).unwrap();
+        assert_eq!(
+            (
+                metadata.channels,
+                metadata.sample_rate,
+                metadata.bit_depth,
+                metadata.frames
+            ),
+            (1, 48000, 16, 7)
+        );
+        let exported = collect(
+            AuditionDecoder::new(
+                Decoder::open(&target).unwrap(),
+                48000,
+                0,
+                0,
+                Default::default(),
+            )
+            .unwrap(),
+        );
+        assert_eq!(&exported[..2], &[0.0; 2]);
+        assert_eq!(exported[6], f32::from(center) / 32768.0);
+        assert_eq!(&exported[12..], &[0.0; 2]);
+        let preview = collect(
+            prepare_audition_decoder(
+                Decoder::open(&source).unwrap(),
+                48000,
+                range.end_seconds(),
+                0,
+                AuditionSettings {
+                    reverse: true,
+                    channel_edit: channels,
+                    fade,
+                    ..Default::default()
+                },
+                Some(range),
+                MonitorOutput::STEREO,
+            )
+            .unwrap(),
+        );
+        assert_eq!(preview.len(), exported.len());
+        assert!(
+            preview
+                .iter()
+                .zip(exported)
+                .all(|(a, b)| (a - b).abs() <= 0.51 / 32768.0)
+        );
+    }
+}
+
+#[test]
 fn fade_preview_matches_wav_for_selection_reverse_and_seek() {
     let temp = tempfile::tempdir().unwrap();
     let source = temp.path().join("source.wav");

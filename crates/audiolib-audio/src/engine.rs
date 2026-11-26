@@ -246,6 +246,12 @@ pub enum AudioCommand {
         range: Option<AudioFrameRange>,
         fade: crate::AudioFade,
     },
+    /// Apply a channel choice to the currently loaded local original.
+    #[serde(skip)]
+    SetChannelEdit {
+        expected_generation: u64,
+        edit: crate::AudioChannelEdit,
+    },
     /// Toggle the current direction in command order, retaining all other transforms.
     ToggleReverse,
     /// Acknowledge after all preceding control commands have completed.
@@ -1921,6 +1927,7 @@ impl Worker {
                 self.cue_position = None;
                 let previous = self.snapshot();
                 self.config.audition.fade = crate::AudioFade::default();
+                self.config.audition.channel_edit = crate::AudioChannelEdit::Original;
                 if previous.file_path.as_ref() != Some(&path) {
                     self.config.audition.stereo_pair = false;
                     self.config.audition.mono = false;
@@ -2250,11 +2257,14 @@ impl Worker {
                     ..self.config.audition
                 }))?;
             }
-            AudioCommand::SetAudition(_) | AudioCommand::SetFade { .. } => {
+            AudioCommand::SetAudition(_)
+            | AudioCommand::SetFade { .. }
+            | AudioCommand::SetChannelEdit { .. } => {
                 let old = self.config.audition;
                 let settings = match command {
                     AudioCommand::SetAudition(settings) => AuditionSettings {
                         fade: old.fade,
+                        channel_edit: old.channel_edit,
                         ..settings
                     },
                     AudioCommand::SetFade {
@@ -2271,6 +2281,27 @@ impl Worker {
                         }
                         AuditionSettings { fade, ..old }
                     }
+                    AudioCommand::SetChannelEdit {
+                        expected_generation,
+                        edit,
+                    } => {
+                        let status = self.snapshot();
+                        if status.generation != expected_generation
+                            || status
+                                .file_path
+                                .as_ref()
+                                .is_none_or(|path| crate::source::is_stream_source(path))
+                        {
+                            return Err(Error::Validation("Stale or remote channel choice".into()));
+                        }
+                        edit.indices(status.channels)?;
+                        AuditionSettings {
+                            channel_edit: edit,
+                            mono: false,
+                            stereo_pair: false,
+                            ..old
+                        }
+                    }
                     _ => unreachable!(),
                 };
                 settings.validate()?;
@@ -2281,6 +2312,7 @@ impl Worker {
                     settings.stereo_pair,
                     settings.reverse,
                     settings.fade,
+                    settings.channel_edit,
                 ) != (
                     old.pitch_semitones,
                     old.rate,
@@ -2288,6 +2320,7 @@ impl Worker {
                     old.stereo_pair,
                     old.reverse,
                     old.fade,
+                    old.channel_edit,
                 ) {
                     let status = self.snapshot();
                     if (settings.reverse || !settings.fade.is_empty())
@@ -2346,6 +2379,7 @@ impl Worker {
                 config.validate()?;
                 let previous = self.config.clone();
                 config.audition.fade = previous.audition.fade;
+                config.audition.channel_edit = previous.audition.channel_edit;
                 let playing = self.snapshot().state == PlaybackState::Playing;
                 let position = self.output.as_ref().map(|output| output.position());
                 self.close_output();
@@ -3398,7 +3432,7 @@ mod tests {
                 stereo_pair: false,
                 loop_enabled: true,
                 reverse: false,
-                fade: Default::default(),
+                ..Default::default()
             };
             let mut worker = worker(PlaybackStatus {
                 generation: 8,

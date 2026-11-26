@@ -96,8 +96,7 @@ pub(super) fn export_via_pcm(
     source: &Path,
     destination: &Path,
     range: AudioFrameRange,
-    reverse: bool,
-    fade: AudioFade,
+    edits: AudioEdits,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(u64, u64),
 ) -> Result<()> {
@@ -105,7 +104,7 @@ pub(super) fn export_via_pcm(
     // Preserve the existing integer FLAC decoder rather than rounding through f32.
     export_audio_slice(source, &spool.file, range, cancel, &mut |_, _| {})?;
     cancelled(cancel)?;
-    export_edited_audio(
+    export_audio_with_edits(
         &spool.file,
         destination,
         Some(AudioFrameRange {
@@ -113,8 +112,7 @@ pub(super) fn export_via_pcm(
             end_frame: range.end_frame - range.start_frame,
             sample_rate: range.sample_rate,
         }),
-        reverse,
-        fade,
+        edits,
         cancel,
         progress,
     )

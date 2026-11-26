@@ -4,6 +4,7 @@
 mod audition;
 // Decoder/resampler paths are only reached through the playback engine; the headless build keeps them for tests.
 mod aiff_metadata;
+mod channel_edit;
 #[cfg_attr(not(feature = "playback"), allow(dead_code))]
 mod decoder;
 #[cfg(feature = "playback")]
@@ -27,14 +28,15 @@ mod wav_metadata;
 mod waveform;
 #[cfg(feature = "playback")]
 pub use audition::AuditionSettings;
+pub use channel_edit::AudioChannelEdit;
 pub use fade::AudioFade;
 pub use list_waveform::{
     LIST_WAVEFORM_ZOOM_LEVEL, list_samples_per_pixel, list_waveform_with_cancel,
     merge_list_channels, quantize_list_peak,
 };
 pub use slice::{
-    PcmWaveSlice, export_audio_slice, export_edited_audio, export_reversed_audio_file,
-    export_reversed_audio_slice, pcm_wave_slice,
+    AudioEdits, PcmWaveSlice, export_audio_slice, export_audio_with_edits, export_edited_audio,
+    export_reversed_audio_file, export_reversed_audio_slice, pcm_wave_slice,
 };
 pub use source::{
     ByteSource, SourceBuffer, SourceOpener, is_stream_source, register_buffered_stream_source,

@@ -23,6 +23,9 @@ pub struct AuditionSettings {
     /// Clip-local fade. Preferences and IPC audition settings omit it.
     #[serde(skip)]
     pub fade: crate::AudioFade,
+    /// Explicit local preview and export channel choice.
+    #[serde(skip)]
+    pub channel_edit: crate::AudioChannelEdit,
 }
 impl Default for AuditionSettings {
     fn default() -> Self {
@@ -34,6 +37,7 @@ impl Default for AuditionSettings {
             loop_enabled: false,
             reverse: false,
             fade: crate::AudioFade::default(),
+            channel_edit: crate::AudioChannelEdit::Original,
         }
     }
 }
@@ -75,6 +79,7 @@ pub(crate) struct AuditionDecoder {
     source: ResampledDecoder,
     channels: usize,
     pair: usize,
+    channel_indices: Option<(usize, Option<usize>)>,
     pcm_channels: usize,
     output: MonitorOutput,
     pub settings: AuditionSettings,
@@ -135,13 +140,18 @@ impl AuditionDecoder {
         if channels == 2 && output.channels > 2 {
             settings.mono = false;
         }
-        let multi = channels > 2 && output.channels > 2 && !settings.mono && !settings.stereo_pair;
+        let channel_indices = settings.channel_edit.indices(metadata.channels)?;
+        let multi = channel_indices.is_none()
+            && channels > 2
+            && output.channels > 2
+            && !settings.mono
+            && !settings.stereo_pair;
         let pcm_channels = if multi {
             channels.min(output.lanes())
         } else {
             2
         };
-        if !multi && usize::from(pair) * 2 >= channels {
+        if !multi && channel_indices.is_none() && usize::from(pair) * 2 >= channels {
             return Err(Error::Validation(
                 "Source channel pair is outside the loaded WAV channels".into(),
             ));
@@ -190,6 +200,7 @@ impl AuditionDecoder {
             pcm_channels,
             output,
             pair: usize::from(pair),
+            channel_indices,
             settings,
             processor,
             flushed: false,
@@ -270,7 +281,11 @@ impl AuditionDecoder {
             } else {
                 let mut pcm = Vec::with_capacity(source.len() / self.channels * self.pcm_channels);
                 for frame in source.chunks_exact(self.channels) {
-                    if self.pcm_channels > 2 {
+                    if let Some((first, second)) = self.channel_indices {
+                        let sample =
+                            second.map_or(frame[first], |next| (frame[first] + frame[next]) * 0.5);
+                        pcm.extend_from_slice(&[sample; 2]);
+                    } else if self.pcm_channels > 2 {
                         pcm.extend_from_slice(&frame[..self.pcm_channels]);
                     } else {
                         let (left, right) = crate::engine::monitor_pair(frame, self.pair);
