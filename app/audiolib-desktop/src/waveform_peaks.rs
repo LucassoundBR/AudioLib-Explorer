@@ -90,7 +90,7 @@ fn project(
     let width = u64::from(width.max(1));
     let edge = |x| start + span / width * x + (span % width) * x / width;
     let spp = u64::from(base.samples_per_pixel.max(1));
-    let sparse = smooth && spp > 1 && span > 0 && span < width * spp;
+    let sparse = smooth && span > 0 && span < width * spp;
     let peaks = base
         .peaks
         .iter()
@@ -324,21 +324,25 @@ mod tests {
             rms: v,
             ..Default::default()
         };
-        let resident = ResidentPeaks::new(WaveformData {
-            sample_rate: 1000,
-            channels: 1,
-            frames: 300,
-            samples_per_pixel: 100,
-            peaks: vec![vec![peak(0.1), peak(1.0), peak(0.2)]],
-        });
-        let plain = resident.viewport(0.0, 0.3, 30, false);
-        let smooth = resident.viewport(0.0, 0.3, 30, true);
-        let before = &plain.peaks[0];
-        let after = &smooth.peaks[0];
-        assert!(before[5..10].iter().all(|p| p.max == 0.1));
-        assert!(after[6..14].windows(2).all(|p| p[0].max < p[1].max));
-        assert!(after.iter().any(|p| p.max == 1.0 && p.min == -1.0));
-        assert!(after.iter().all(|p| (0.1..=1.0).contains(&p.max)));
+        for samples_per_pixel in [1, 100] {
+            let frames = u64::from(samples_per_pixel) * 3;
+            let resident = ResidentPeaks::new(WaveformData {
+                sample_rate: 1000,
+                channels: 1,
+                frames,
+                samples_per_pixel,
+                peaks: vec![vec![peak(0.1), peak(1.0), peak(0.2)]],
+            });
+            let duration = frames as f64 / 1000.0;
+            let plain = resident.viewport(0.0, duration, 30, false);
+            let smooth = resident.viewport(0.0, duration, 30, true);
+            let before = &plain.peaks[0];
+            let after = &smooth.peaks[0];
+            assert!(before[5..10].iter().all(|p| p.max == 0.1));
+            assert!(after[6..14].windows(2).all(|p| p[0].max < p[1].max));
+            assert!(after.iter().any(|p| p.max == 1.0 && p.min == -1.0));
+            assert!(after.iter().all(|p| (0.1..=1.0).contains(&p.max)));
+        }
     }
 
     #[test]

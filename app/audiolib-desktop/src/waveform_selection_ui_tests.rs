@@ -1218,6 +1218,13 @@ fn fade_handles_commit_in_playback_order_and_escape_discards_the_draft() {
             });
             moved(&ui, end);
             assert!(ui.get_wave_selection_gesture());
+            let moved_handle = ElementHandle::find_by_accessible_label(&ui, label)
+                .next()
+                .unwrap();
+            assert!(
+                (center(&moved_handle).x - end.x).abs() <= size.width,
+                "{label} should follow the dragged ramp tip before release"
+            );
             if cancel {
                 escape(&ui);
             }
@@ -1244,6 +1251,35 @@ fn fade_handles_commit_in_playback_order_and_escape_discards_the_draft() {
         assert!(ranges.borrow().is_empty());
         ui.hide().unwrap();
     }
+}
+
+#[test]
+fn waveform_lucas_requests_physical_pixels_when_scale_changes() {
+    i_slint_backend_testing::init_no_event_loop();
+    let ui = window(false);
+    crate::theme::apply_theme(&ui, audiolib_core::config::DEFAULT_LUCAS_THEME);
+    let size = Rc::new(RefCell::new((0, 0)));
+    let observed = size.clone();
+    ui.on_waveform_resize_requested(move |w, h| *observed.borrow_mut() = (w, h));
+    for scale in [1.25, 1.5, 2.0] {
+        ui.window().dispatch_event(WindowEvent::ScaleFactorChanged {
+            scale_factor: scale,
+        });
+        let timeline = ElementHandle::find_by_accessible_label(&ui, "Waveform timeline")
+            .next()
+            .unwrap();
+        let logical = timeline.size();
+        settle();
+        let (width, height) = *size.borrow();
+        // The accessibility bounds and the raster surface may round opposite
+        // ends of a fractional physical pixel independently.
+        assert!(
+            (width - (logical.width * scale).round() as i32).abs() <= 1
+                && (height - (logical.height * scale).round() as i32).abs() <= 1,
+            "scale {scale}: raster surfacing at {width}x{height} for {logical:?}"
+        );
+    }
+    ui.hide().unwrap();
 }
 
 #[test]

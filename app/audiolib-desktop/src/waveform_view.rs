@@ -241,13 +241,14 @@ fn ruler_label(seconds: f64, decimals: usize, hours: bool) -> String {
 
 type WavePixels = slint::SharedPixelBuffer<slint::Rgba8Pixel>;
 
-/// Project the peak at a column center. Quiet single-sample views still need
-/// a thin trace when the lower and upper bounds meet.
+/// Project the peak at a physical column center. Near sample scale, give a
+/// coincident envelope enough coverage for a solid center and an antialiased edge.
 fn envelope_point(
     peak: &audiolib_audio::WaveformPeak,
     center: f32,
     amplitude: f32,
     gain: f32,
+    half_trace: f32,
 ) -> [f32; 2] {
     if peak.max.abs().max(peak.min.abs()) * gain < 0.00001 {
         return [center; 2];
@@ -255,7 +256,10 @@ fn envelope_point(
     let upper = center - (peak.max * gain).clamp(-1.0, 1.0) * amplitude;
     let lower = center - (peak.min * gain).clamp(-1.0, 1.0) * amplitude;
     let middle = (upper + lower) * 0.5;
-    [upper.min(middle - 0.35), lower.max(middle + 0.35)]
+    [
+        upper.min(middle - half_trace),
+        lower.max(middle + half_trace),
+    ]
 }
 
 /// The coverage of one pixel below a line segment spanning a half-column.
@@ -337,6 +341,11 @@ pub(crate) fn render_waveform_layers(
     let lane = height as f32 / channels as f32;
     let gain = 10.0_f32.powf(view.gain_db.clamp(-12.0, 36.0) / 20.0);
     let opacity = view.opacity.clamp(0.0, 1.0);
+    let half_trace = if data.samples_per_pixel <= 1 {
+        0.7
+    } else {
+        0.35
+    };
     let center_color = if view.spectral {
         [98, 111, 116]
     } else {
@@ -353,7 +362,7 @@ pub(crate) fn render_waveform_layers(
         let bottom = end - 1;
         let center_row = (center as u32).clamp(top, bottom);
         let peak_at = |x| &peaks[x as usize * peaks.len() / width as usize];
-        let point_at = |x| envelope_point(peak_at(x), center, amplitude, gain);
+        let point_at = |x| envelope_point(peak_at(x), center, amplitude, gain, half_trace);
         let mut previous = view.light_canvas.then(|| point_at(0));
         let mut current = previous;
         for x in 0..width {

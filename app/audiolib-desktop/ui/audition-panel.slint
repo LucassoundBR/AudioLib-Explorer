@@ -11,6 +11,10 @@ export struct WaveFade { enabled: bool, leading: float, trailing: float }
 global Clock {
     public pure function pad2(value: int) -> string { return value < 10 ? "0" + value : "" + value; }
     public pure function pad3(value: int) -> string { return value < 10 ? "00" + value : (value < 100 ? "0" + value : "" + value); }
+    public pure function minutes-seconds(seconds: float) -> string {
+        let whole = floor(max(0, seconds));
+        return Clock.pad2(floor(whole / 60)) + ":" + Clock.pad2(Math.mod(whole, 60));
+    }
     // mm:ss.mmm, the transport clock format published by the controller.
     public pure function format(seconds: float) -> string {
         let ms = floor(max(0, seconds) * 1000);
@@ -1070,8 +1074,24 @@ component WaveformPointer inherits Image {
     image-fit: contain; accessible-role: none;
 }
 
+// The fixed alpha texture avoids rasterizing a Path between dirty spans.
+// Clip to the viewport before drawing without changing the ramp's slope.
+component FadeShade inherits Image {
+    in property <length> start;
+    in property <length> end;
+    in property <length> viewport;
+    private property <length> span: max(0.0001px, root.end - root.start);
+    x: max(0px, root.start);
+    y: 0px;
+    width: max(0px, min(root.viewport, root.end) - self.x);
+    source-clip-x: clamp(round((self.x - root.start) / root.span * self.source.width), 0, self.source.width - 1);
+    source-clip-width: clamp(round((self.x + self.width - root.start) / root.span * self.source.width) - self.source-clip-x, 1, self.source.width - self.source-clip-x);
+    image-fit: fill;
+    accessible-role: none;
+}
+
 // Plot coordinates map directly to source time; the grip occupies a separate dock slot.
-component WaveSelectionOverlay inherits Rectangle {
+export component WaveSelectionOverlay inherits Rectangle {
     in property <WaveFade> fade-edit;
     callback fade-committed(float,float);
     in property <bool> enabled;
@@ -1169,16 +1189,25 @@ component WaveSelectionOverlay inherits Rectangle {
     property <float> fade-end: root.selection-active ? root.selection-end : root.duration;
     property <length> fade-left-x: (root.fade-start - root.view-start) / root.span * root.width;
     property <length> fade-right-x: (root.fade-end - root.view-start) / root.span * root.width;
-    property <length> fade-reach: max(0px, min(13px * Theme.ui-scale, (root.fade-right-x - root.fade-left-x) / 2));
+    property <length> fade-reach: 7px * Theme.ui-scale;
     property <length> fade-height: 12px * Theme.ui-scale;
     property <bool> fade-visible: root.fade-edit.enabled && root.enabled && !root.editing && root.fade-end > root.fade-start;
-    property <bool> left-fade-visible: root.fade-visible && root.fade-left-x >= 0px && root.fade-left-x < root.width;
-    property <bool> right-fade-visible: root.fade-visible && root.fade-right-x > 0px && root.fade-right-x <= root.width;
-    property <int> fade-hit: hit.mouse-y >= 0px && hit.mouse-y < root.fade-height
-        ? (root.left-fade-visible && hit.mouse-x >= root.fade-left-x && hit.mouse-x < root.fade-left-x + root.fade-reach ? 1
-        : root.right-fade-visible && hit.mouse-x <= root.fade-right-x && hit.mouse-x >= root.fade-right-x - root.fade-reach ? 2 : 0) : 0;
     property <float> shown-leading: root.mode == 9 ? root.draft-leading : root.fade-edit.leading;
     property <float> shown-trailing: root.mode == 10 ? root.draft-trailing : root.fade-edit.trailing;
+    property <length> leading-width: root.shown-leading / root.span * root.width;
+    property <length> trailing-width: root.shown-trailing / root.span * root.width;
+    property <length> leading-tip: root.fade-left-x + root.leading-width;
+    property <length> trailing-tip: root.fade-right-x - root.trailing-width;
+    property <bool> left-fade-visible: root.fade-visible && root.leading-tip >= 0px && root.leading-tip <= root.width;
+    property <bool> right-fade-visible: root.fade-visible && root.trailing-tip >= 0px && root.trailing-tip <= root.width;
+    property <length> leading-distance: abs(hit.mouse-x - root.leading-tip);
+    property <length> trailing-distance: abs(hit.mouse-x - root.trailing-tip);
+    property <bool> hits-leading: root.left-fade-visible && root.leading-distance <= root.fade-reach;
+    property <bool> hits-trailing: root.right-fade-visible && root.trailing-distance <= root.fade-reach;
+    property <int> fade-hit: hit.mouse-y >= 0px && hit.mouse-y < root.fade-height
+        ? (root.hits-leading && (!root.hits-trailing || root.leading-distance < root.trailing-distance
+            || (root.leading-distance == root.trailing-distance && hit.mouse-x <= root.leading-tip)) ? 1
+        : root.hits-trailing ? 2 : 0) : 0;
     property <bool> travelled: false;
     property <bool> is-preparing: root.preparing || root.export-state == 1;
     property <bool> editing: root.mode > 0 && root.mode < 4;
@@ -1188,6 +1217,10 @@ component WaveSelectionOverlay inherits Rectangle {
     property <float> span: max(0.000001, root.view-end - root.view-start);
     property <length> left-x: (root.shown-start - root.view-start) / root.span * root.width;
     property <length> right-x: (root.shown-end - root.view-start) / root.span * root.width;
+    property <length> visible-left: max(0px, root.left-x);
+    property <length> visible-right: min(root.width, root.right-x);
+    property <bool> duration-fits: root.shown-active && root.visible-right - root.visible-left >= duration-stamp.preferred-width + 18px * Theme.ui-scale
+        && root.height >= duration-stamp.preferred-height + 12px * Theme.ui-scale;
     property <length> handle-reach: (Theme.default-lucas ? 10px : 5px) * Theme.ui-scale;
     property <length> handle-stroke: Theme.default-lucas ? 2px * Theme.ui-scale : 1px;
     property <bool> near-left: root.selection-active && root.selection-start >= root.view-start && root.selection-start <= root.view-end && abs(hit.mouse-x - root.left-x) <= root.handle-reach;
@@ -1263,7 +1296,7 @@ component WaveSelectionOverlay inherits Rectangle {
     accessible-label: root.chinese ? "波形选区" : "Waveform selection";
     accessible-description: root.hint;
     if root.shown-active && root.shown-end > root.view-start && root.shown-start < root.view-end: Rectangle {
-        x: max(0px, root.left-x); y: 0px; width: max(0px, min(root.width, root.right-x) - self.x); height: root.height;
+        x: root.visible-left; y: 0px; width: max(0px, root.visible-right - self.x); height: root.height;
         background: Theme.accent.with-alpha(0.24);
         accessible-role: text; accessible-label: root.chinese ? "选中的波形区域" : "Selected waveform region";
     }
@@ -1282,35 +1315,37 @@ component WaveSelectionOverlay inherits Rectangle {
     if root.fade-visible: Rectangle {
         x: 0px; y: 0px; width: root.width; height: root.height;
         clip: true;
-        if root.shown-leading > 0: Path {
-            x: root.fade-left-x; y: 0px;
-            width: root.shown-leading / root.span * root.width; height: root.height;
-            viewbox-width: 100; viewbox-height: 100;
-            fit: fill; stroke-width: 0px; fill: #00000055;
-            MoveTo { x: 0; y: 0; }
-            LineTo { x: 100; y: 0; }
-            LineTo { x: 0; y: 100; }
-            Close { }
+        if root.leading-width > 0px && root.leading-tip > 0px && root.fade-left-x < root.width: FadeShade {
+            start: root.fade-left-x; end: root.leading-tip; viewport: root.width;
+            height: root.height; source: @image-url("icons/wave-fade-in-shade.png");
         }
-        if root.shown-trailing > 0: Path {
-            x: root.fade-right-x - self.width; y: 0px;
-            width: root.shown-trailing / root.span * root.width; height: root.height;
-            viewbox-width: 100; viewbox-height: 100;
-            fit: fill; stroke-width: 0px; fill: #00000055;
-            MoveTo { x: 0; y: 0; }
-            LineTo { x: 100; y: 0; }
-            LineTo { x: 100; y: 100; }
-            Close { }
+        if root.trailing-width > 0px && root.fade-right-x > 0px && root.trailing-tip < root.width: FadeShade {
+            start: root.trailing-tip; end: root.fade-right-x; viewport: root.width;
+            height: root.height; source: @image-url("icons/wave-fade-out-shade.png");
         }
         if root.left-fade-visible: Rectangle {
-            x: root.fade-left-x; y: 0px; width: root.fade-reach; height: root.fade-height;
+            width: 8px * Theme.ui-scale; height: self.width;
+            x: clamp(root.leading-tip - self.width / 2, 0px, max(0px, parent.width - self.width)); y: 0px;
+            background: root.pointer-kind == 12 ? Theme.accent-hover : Theme.accent;
             accessible-role: text; accessible-label: root.chinese ? "淡入" : "Fade In";
-            Rectangle { x: 1px; y: 1px; width: parent.width * 0.62; height: parent.height * 0.62; border-radius: 2px; background: root.pointer-kind == 12 ? Theme.accent-hover : Theme.accent; }
         }
         if root.right-fade-visible: Rectangle {
-            x: root.fade-right-x - root.fade-reach; y: 0px; width: root.fade-reach; height: root.fade-height;
+            width: 8px * Theme.ui-scale; height: self.width;
+            x: clamp(root.trailing-tip - self.width / 2, 0px, max(0px, parent.width - self.width)); y: 0px;
+            background: root.pointer-kind == 13 ? Theme.accent-hover : Theme.accent;
             accessible-role: text; accessible-label: root.chinese ? "淡出" : "Fade Out";
-            Rectangle { x: parent.width - self.width - 1px; y: 1px; width: parent.width * 0.62; height: parent.height * 0.62; border-radius: 2px; background: root.pointer-kind == 13 ? Theme.accent-hover : Theme.accent; }
+        }
+    }
+    Rectangle {
+        visible: root.duration-fits;
+        x: root.visible-right - self.width - 6px * Theme.ui-scale; y: parent.height - self.height - 5px * Theme.ui-scale;
+        width: duration-stamp.preferred-width + 8px * Theme.ui-scale; height: duration-stamp.preferred-height + 4px * Theme.ui-scale;
+        background: Theme.tooltip; border-radius: 2px * Theme.ui-scale;
+        accessible-role: text; accessible-label: root.chinese ? "选区时长" : "Selection duration"; accessible-description: duration-stamp.text;
+        duration-stamp := Text {
+            width: parent.width; height: parent.height;
+            text: Clock.minutes-seconds(root.shown-end - root.shown-start);
+            color: Theme.text(4, 0, Theme.ink); font-size: Theme.font(10); horizontal-alignment: center; vertical-alignment: center; accessible-role: none;
         }
     }
     hit := TouchArea {
@@ -1415,9 +1450,9 @@ component WaveSelectionOverlay inherits Rectangle {
                 Timer { interval: Theme.tooltip-delay; running: grip.has-hover && !root.gesture && !grip-frame.tip-ready; triggered => { grip-frame.tip-ready = true; } }
                 Tip { z: 10; anchor-width: parent.width; anchor-height: parent.height; align: -1; text: root.hint; show: grip-frame.tip-ready && grip.has-hover && !root.gesture; }
             }
-            if root.shown-active: Text {
+            if root.shown-active && !root.duration-fits: Text {
                 width: self.preferred-width;
-                text: Clock.fixed2(max(0, root.shown-end - root.shown-start)) + " s";
+                text: Clock.minutes-seconds(root.shown-end - root.shown-start);
                 color: Theme.text(4, 0, Theme.ink); font-size: Theme.font(9); vertical-alignment: center; overflow: elide;
                 accessible-role: text; accessible-label: root.chinese ? "选区时长" : "Selection duration"; accessible-description: self.text;
             }
@@ -1725,8 +1760,11 @@ component ClassicAuditionPanel inherits Rectangle {
             wave := Rectangle { x: 0px; y: 0px; width: parent.width - (Theme.default-lucas ? gain-lane.width : 0px); height: parent.height; background: Theme.default-lucas ? #a2adb1 : root.spectral && root.waveform-ready ? Theme.spectral-canvas : Theme.normal-canvas; border-color: Theme.player-border; border-width: 1px; clip: true;
                 accessible-role: groupbox; accessible-label: root.chinese ? "波形时间轴" : "Waveform timeline";
                 property <float> played-fraction: root.duration > 0 ? clamp((root.visual-position - root.shown-start) / max(0.001, root.shown-end - root.shown-start), 0, 1) : 0;
-                changed width => { root.resize(self.width / 1px, self.height / 1px); }
-                changed height => { root.resize(self.width / 1px, self.height / 1px); }
+                property <float> raster-scale: Theme.default-lucas ? 1px / 1phx : 1;
+                property <int> raster-width: round(self.width / 1px * self.raster-scale);
+                property <int> raster-height: round(self.height / 1px * self.raster-scale);
+                changed raster-width => { root.resize(self.raster-width, self.raster-height); }
+                changed raster-height => { root.resize(self.raster-width, self.raster-height); }
                 Image {
                     source: root.waveform; height: parent.height; image-fit: fill;
                     x: (root.view-start - root.shown-start) / root.shown-span * parent.width;

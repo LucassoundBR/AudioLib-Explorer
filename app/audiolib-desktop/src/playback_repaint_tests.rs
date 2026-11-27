@@ -152,7 +152,22 @@ fn playback_repaints_only_around_the_playhead_in_every_theme() {
 }
 
 slint::slint! {
-    import { PlayedRegion } from "../ui/audition-panel.slint";
+    import { PlayedRegion, WaveSelectionOverlay } from "../ui/audition-panel.slint";
+
+    export component FadeRepaintProbe inherits Window {
+        in property <length> playhead;
+        width: 640px;
+        height: 110px;
+        background: #849094;
+        Rectangle { x: root.playhead; width: 2px; height: 100px; background: white; }
+        WaveSelectionOverlay {
+            width: parent.width; height: 100px;
+            enabled: true;
+            duration: 10; view-start: 0; view-end: 10;
+            selection-active: true; selection-start: 1; selection-end: 9;
+            fade-edit: { enabled: true, leading: 3, trailing: 2 };
+        }
+    }
 
     export component PlayedRegionProbe inherits Window {
         in property <float> head;
@@ -181,6 +196,66 @@ slint::slint! {
             }
         }
     }
+}
+
+#[test]
+fn waveform_fade_shade_repaint_matches_full_while_hover_and_playhead_move() {
+    use slint::platform::WindowEvent;
+    use slint::private_unstable_api::re_exports::{LogicalRect, WindowInner};
+
+    let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
+    let now = Rc::new(Cell::new(Duration::ZERO));
+    slint::platform::set_platform(Box::new(Platform {
+        window: window.clone(),
+        now: now.clone(),
+    }))
+    .unwrap();
+    let ui = FadeRepaintProbe::new().unwrap();
+    let scale = 1.5;
+    let width = 960;
+    let height = 165;
+    ui.window().dispatch_event(WindowEvent::ScaleFactorChanged {
+        scale_factor: scale,
+    });
+    ui.window()
+        .set_size(slint::PhysicalSize::new(width as u32, height as u32));
+    ui.show().unwrap();
+    let mut buffer = vec![slint::Rgb8Pixel::default(); width * height];
+    let paint = |pixels: &mut [slint::Rgb8Pixel]| {
+        now.set(now.get() + Duration::from_micros(16_667));
+        slint::platform::update_timers_and_animations();
+        window.draw_if_needed(|renderer| {
+            renderer.render(pixels, width);
+        });
+    };
+    paint(&mut buffer);
+    let at = |x: f32, y: f32| (y * scale) as usize * width + (x * scale) as usize;
+    // The two triangles must darken the same selection fill near their top
+    // corners, with the middle and the area below the ramps left alone.
+    assert!(buffer[at(100.0, 20.0)].r < buffer[at(320.0, 20.0)].r);
+    assert!(buffer[at(540.0, 20.0)].r < buffer[at(320.0, 20.0)].r);
+    assert_eq!(buffer[at(100.0, 90.0)], buffer[at(320.0, 90.0)]);
+    let renderer = WindowInner::from_pub(ui.window());
+    for (frame, mouse_x) in [150.0, 195.0, 255.0, 260.0, 247.0, 462.0, 505.0, 445.0]
+        .into_iter()
+        .enumerate()
+    {
+        ui.set_playhead(105.0 + frame as f32 * 3.0);
+        ui.window().dispatch_event(WindowEvent::PointerMoved {
+            position: slint::LogicalPosition::new(mouse_x, 4.0),
+        });
+        paint(&mut buffer);
+        let mut full = buffer.clone();
+        let size = ui.window().size().to_logical(scale);
+        renderer.window_adapter().renderer().mark_dirty_region(
+            LogicalRect::new([0.0, 0.0].into(), [size.width, size.height].into()).into(),
+        );
+        ui.window().request_redraw();
+        paint(&mut full);
+        let differing_pixels = buffer.iter().zip(&full).filter(|(a, b)| a != b).count();
+        assert_eq!(differing_pixels, 0, "stale fade pixels at x={mouse_x}");
+    }
+    ui.hide().unwrap();
 }
 
 #[test]
