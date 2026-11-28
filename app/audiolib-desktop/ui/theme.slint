@@ -169,10 +169,10 @@ export component ThemedSlider inherits Rectangle {
     min-height: 20px * Theme.ui-scale; min-width: 20px * Theme.ui-scale;
     horizontal-stretch: 1; vertical-stretch: 0;
     in property <color> surface: Theme.player;
-    // Fluent's standard Slider owns input with a fixed 20px thumb. Keep the
-    // painted thumb and its travel identical: a larger painted thumb would make
-    // its edges act as track clicks and jump the value before a drag begins.
+    // Fluent uses a fixed 20px hitbox. Keep the themed thumb centered in that
+    // hitbox so visual sizing leaves pointer travel and grab behavior intact.
     out property <length> thumb-size: 20px;
+    in property <float> thumb-visual-scale: 1;
     // Slint's native accessibility actions call SliderBase setters directly,
     // bypassing its pointer/key enabled checks. Guard before mutating bound state.
     function accessible-set-value(value: float) {
@@ -186,13 +186,15 @@ export component ThemedSlider inherits Rectangle {
     }
     native := Slider {
         width: parent.width; height: parent.height; accessible-label: root.input-label;
+        // Keep native input and accessibility without painting a second, linear thumb.
+        opacity: 0;
         accessible-action-set-value(v) => { if v.is-float() { root.accessible-set-value(v.to-float()); } }
         accessible-action-increment => { root.accessible-set-value(root.value + root.step); }
         accessible-action-decrement => { root.accessible-set-value(root.value - root.step); }
     }
     Rectangle { background: root.surface; }
     property <bool> vertical: root.orientation == Orientation.vertical;
-    property <float> fraction: clamp((root.value - root.minimum) / max(0.001, root.maximum - root.minimum), 0, 1);
+    in property <float> fraction: clamp((root.value - root.minimum) / max(0.001, root.maximum - root.minimum), 0, 1);
     Rectangle {
         x: root.vertical ? (parent.width - self.width) / 2 : root.thumb-size / 2;
         y: root.vertical ? root.thumb-size / 2 : (parent.height - self.height) / 2;
@@ -209,13 +211,13 @@ export component ThemedSlider inherits Rectangle {
         }
     }
     thumb := Rectangle {
-        x: root.vertical ? (parent.width - self.width) / 2 : (parent.width - root.thumb-size) * root.fraction;
-        y: root.vertical ? max(0px, parent.height - root.thumb-size) * (1 - root.fraction) : (parent.height - self.height) / 2;
-        width: root.thumb-size; height: root.thumb-size; border-radius: root.thumb-size / 2;
+        x: root.vertical ? (parent.width - self.width) / 2 : (parent.width - root.thumb-size) * root.fraction + (root.thumb-size - self.width) / 2;
+        y: root.vertical ? max(0px, parent.height - root.thumb-size) * (1 - root.fraction) + (root.thumb-size - self.height) / 2 : (parent.height - self.height) / 2;
+        width: root.thumb-size * root.thumb-visual-scale; height: self.width; border-radius: self.width / 2;
         background: Theme.raised; border-width: 1px;
         border-color: root.has-focus ? Theme.accent : Theme.strong-border;
         opacity: root.enabled ? 1 : 0.45;
-        Rectangle { x: 4px; y: 4px; width: 12px; height: 12px; border-radius: 6px; background: Theme.accent; }
+        Rectangle { x: parent.width * 0.2; y: self.x; width: parent.width * 0.6; height: self.width; border-radius: self.width / 2; background: Theme.accent; }
     }
     // Paint-only rectangles do not intercept the standard pointer/key/accessibility owner.
 }

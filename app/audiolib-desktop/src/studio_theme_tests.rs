@@ -182,6 +182,88 @@ fn default_lucas_keeps_shared_peak_gain_and_adds_inline_transforms() {
     ui.hide().unwrap();
 }
 
+#[test]
+fn audition_sliders_center_neutral_values_and_reset_display_gain() {
+    use i_slint_backend_testing::AccessibleRole;
+
+    init_backend();
+    let ui = fixture(false);
+    apply_theme(&ui, DEFAULT_LUCAS_THEME);
+    ui.show().unwrap();
+    let slider = |label| {
+        ElementHandle::find_by_accessible_label(&ui, label)
+            .find(|element| element.accessible_role() == Some(AccessibleRole::Slider))
+            .unwrap_or_else(|| panic!("missing slider {label}"))
+    };
+    let click = |point| {
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(600));
+        pointer_down(&ui, point);
+        pointer_up(&ui, point);
+    };
+    let reset = |point| {
+        click(point);
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(40));
+        pointer_down(&ui, point);
+        pointer_up(&ui, point);
+        assert_eq!(ui.get_peak_gain(), 0.0);
+    };
+
+    let rate = slider("Adjust speed");
+    let center = control_center(&rate);
+    let quarter_travel = (rate.size().width - 20.0) / 4.0;
+    ui.set_speed_text("4.00".into());
+    click(center);
+    assert_eq!(ui.get_speed_text(), "1.00");
+    click(slint::LogicalPosition::new(
+        center.x - quarter_travel,
+        center.y,
+    ));
+    assert_eq!(ui.get_speed_text(), "0.50");
+    click(slint::LogicalPosition::new(
+        center.x + quarter_travel,
+        center.y,
+    ));
+    assert_eq!(ui.get_speed_text(), "2.00");
+    key(&ui, Key::RightArrow.into());
+    assert_eq!(ui.get_speed_text(), "2.01");
+
+    let vertical = slider("Waveform display gain");
+    let center = control_center(&vertical);
+    let quarter_travel = (vertical.size().height - 20.0) / 4.0;
+    ui.set_peak_gain(36.0);
+    click(center);
+    assert_eq!(ui.get_peak_gain(), 0.0);
+    click(slint::LogicalPosition::new(
+        center.x,
+        center.y - quarter_travel,
+    ));
+    assert_eq!(ui.get_peak_gain(), 18.0);
+    let lower = slint::LogicalPosition::new(center.x, center.y + quarter_travel);
+    click(lower);
+    assert_eq!(ui.get_peak_gain(), -6.0);
+    reset(lower);
+    key(&ui, Key::UpArrow.into());
+    assert_eq!(ui.get_peak_gain(), 1.0);
+
+    activate(&ui, "Peak display settings");
+    i_slint_backend_testing::mock_elapsed_time(Duration::ZERO);
+    let horizontal = slider("Display gain");
+    assert_eq!(horizontal.accessible_value().as_deref(), Some("1"));
+    let center = control_center(&horizontal);
+    let right =
+        slint::LogicalPosition::new(center.x + (horizontal.size().width - 20.0) / 4.0, center.y);
+    ui.set_peak_gain(36.0);
+    click(center);
+    assert_eq!(ui.get_peak_gain(), 0.0);
+    click(right);
+    assert_eq!(ui.get_peak_gain(), 18.0);
+    reset(right);
+    key(&ui, Key::RightArrow.into());
+    assert_eq!(ui.get_peak_gain(), 1.0);
+    assert_eq!(vertical.accessible_value().as_deref(), Some("1"));
+    ui.hide().unwrap();
+}
+
 fn player_actions(ui: &AppWindow, label: &str) -> Vec<ElementHandle> {
     // In Chinese the menu bar's Playback entry is also named 播放. Scope the
     // transport query to the audition panel rather than invoking that menu.
@@ -1064,7 +1146,10 @@ fn transform_popups_apply_integer_cents_and_speed_in_both_themes() {
         let slider = ElementHandle::find_by_accessible_label(&ui, "Adjust speed")
             .find(|item| item.accessible_value_minimum() == Some(0.25))
             .unwrap();
-        let point = transform_popup_point(&ui, &rate, &slider);
+        // After centering 1× logarithmically, 0.80× is close enough to
+        // the middle that a center click can grab the existing thumb.
+        let mut point = transform_popup_point(&ui, &rate, &slider);
+        point.x += slider.size().width * 0.3;
         pointer_down(&ui, point);
         assert_eq!(submissions.borrow().len(), 1, "Drag only previews");
         pointer_up(&ui, point);
